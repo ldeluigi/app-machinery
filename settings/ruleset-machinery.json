@@ -56,6 +56,10 @@
           {
             "context": "Plugins and tools",
             "integration_id": 15368
+          },
+          {
+            "context": "The template builds",
+            "integration_id": 15368
           }
         ]
       }
