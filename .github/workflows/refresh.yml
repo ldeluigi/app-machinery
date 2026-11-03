@@ -1,0 +1,172 @@
+name: Refresh
+
+# Monthly upkeep of an app, in two jobs:
+# - refresh: bumps what Dependabot can't see (the JDK in .java-version), runs health checks (Gradle deprecations,
+#   credentials about to expire, stuck pull requests) and opens a pull request `machinery/YYYY-MM` with the report,
+#   even when nothing was bumped, since the review below is monthly too;
+# - review: an AI agent (Claude, then Copilot) works on that branch: it fixes the deprecations and new lint findings,
+#   adapts the code to a new Android target SDK, checks the stores' latest policy updates against the app, opens one
+#   issue for each thing only the owner can do, and labels the pull request `automerge` (or `needs-human`).
+#
+# The app's caller runs this monthly and by hand: docs/02-new-app.md. The machinery refreshes itself the same way
+# (self-refresh.yml), and its releases reach the app through Dependabot.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Refresh and check health
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      branch: ${{ steps.open.outputs.branch }}
+      number: ${{ steps.open.outputs.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - &find-machinery
+        id: machinery
+        name: Find the machinery
+        env:
+          WORKFLOW: ${{ job.workflow_ref }}
+        run: echo "repository=${WORKFLOW%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+      - &checkout-machinery
+        name: Check out the machinery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.machinery.outputs.repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .machinery
+          persist-credentials: false
+      - uses: ./.machinery/.github/actions/setup-build
+      - id: bump
+        name: Bump versions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          echo ".machinery/" >> .git/info/exclude
+          ./.machinery/gradlew -p .machinery :tools:bump:installDist --quiet
+          .machinery/tools/bump/build/install/bump/bin/bump
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Health checks
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: .machinery/.github/scripts/health-report.sh build/machinery-report.md
+      # Not create-pull-request: with nothing to bump, the pull request still comes, as an empty commit, since the agent
+      # checks the report and the stores' policy updates every month
+      - id: open
+        name: Open the pull request
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          SLUG: ${{ steps.token.outputs.app-slug }}
+        run: |
+          branch="machinery/$(date -u +%Y-%m)"
+          title="build(machinery): monthly refresh"
+          id="$(gh api "/users/$SLUG%5Bbot%5D" --jq .id)"
+          git config user.name "$SLUG[bot]"
+          git config user.email "$id+$SLUG[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          # build/ (the report) is git-ignored: naming it, even to exclude it, makes git add fail
+          git add -A
+          git commit --allow-empty -m "$title"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+          gh label create machinery-review --color 5319E7 --description "Monthly refresh: the agent reviews it" --force
+          gh pr create --head "$branch" --title "$title" --body-file build/machinery-report.md --label machinery-review \
+            || gh pr edit "$branch" --body-file build/machinery-report.md --add-label machinery-review
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "number=$(gh pr view "$branch" --json number --jq .number)" >> "$GITHUB_OUTPUT"
+
+  review:
+    name: Review
+    needs: refresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.refresh.outputs.branch }}
+          persist-credentials: false
+      - *find-machinery
+      - *checkout-machinery
+      - id: agent
+        uses: ./.machinery/.github/actions/agent
+        with:
+          web: "true"
+          allowed-commands: gh pr view,gh issue list,gh release view
+          allowed-bots: ${{ vars.GH_APP_LOGIN }}
+          branch: ${{ needs.refresh.outputs.branch }}
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          app-client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          prompt: |
+            You review the app's monthly refresh, pull request #${{ needs.refresh.outputs.number }}
+            (`gh pr view ${{ needs.refresh.outputs.number }}`): its description is a health report of versions bumped,
+            deprecation warnings, expiring credentials and stuck items. You are checked out on its branch. Read
+            AGENTS.md first: it holds the rules for AI agents.
+
+            1. Fix every code or build item of the report on this branch: Gradle and Android Gradle plugin deprecation
+               warnings (`./gradlew help --warning-mode=all`), the behaviour changes a new Android target SDK requires
+               (read the Android behaviour-changes page of that version), new lint, detekt or ktlint findings.
+            2. Keep the app within the stores' policies. Read Google Play's policy announcements of the last three
+               months (https://support.google.com/googleplay/android-developer/announcements/13412212) and its policy
+               deadlines of the next six (https://support.google.com/googleplay/android-developer/table/12921780), and
+               the App Store Review Guidelines' latest changes (https://developer.apple.com/app-store/review/guidelines/).
+               For each, decide whether it applies to the app, from its permissions and features (its manifests and
+               Info.plist), its target SDK and what it does with data (its privacy policy), and fix on this branch what
+               code can fix.
+            3. Run the app's checks (`./gradlew check`) until they pass, and commit with Conventional Commit messages,
+               never with an issue number in them. Push nothing: the workflow publishes your commits.
+            4. End with a short answer, in Markdown: what you fixed; each policy announcement and deadline you checked
+               and what you did about it; and, as a list headed `Owner:`, each thing only the owner can do (a store
+               console declaration, the Data safety form, a store listing, a credential), with its deadline and steps.
+      - id: token
+        if: ${{ !cancelled() }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Post the review and let it merge
+        if: steps.token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ needs.refresh.outputs.number }}
+          DONE: ${{ steps.agent.outputs.done }}
+          ANSWER: ${{ steps.agent.outputs.response || format('No agent could review the refresh: {0}', steps.agent.outputs.error || 'neither Claude nor Copilot is set up.') }}
+        run: |
+          gh pr comment "$NUMBER" --body "$ANSWER"
+          # What only the owner can do becomes one issue a month, unless one with that title is still open
+          owner="$(printf '%s\n' "$ANSWER" | sed -n '/^\**Owner:\**/,$p' | tail -n +2)"
+          title="Owner: the monthly refresh's to-dos ($(date -u +%Y-%m))"
+          if [ -n "$(printf '%s' "$owner" | tr -d '[:space:]')" ] && \
+             [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')" ]; then
+            gh issue create --title "$title" --body "$(printf 'From the review of #%s:\n\n%s' "$NUMBER" "$owner")"
+          fi
+          if [ "$DONE" = "true" ]; then
+            gh label create automerge --color 0E8A16 --description "Merge automatically once CI is green" --force
+            gh pr edit "$NUMBER" --add-label automerge
+          else
+            gh label create needs-human --color D93F0B --description "Automation could not handle this" --force
+            gh pr edit "$NUMBER" --add-label needs-human
+          fi

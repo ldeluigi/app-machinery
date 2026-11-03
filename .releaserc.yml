@@ -1,0 +1,16 @@
+# The machinery's own releases (self-release.yml): feat -> minor, fix/perf/revert -> patch, BREAKING CHANGE -> major.
+# Apps pin a release by its commit (Dependabot moves them) and its plugins by its version.
+branches: [main]
+tagFormat: "v${version}"
+plugins:
+  - - "@semantic-release/commit-analyzer"
+    - preset: conventionalcommits
+      releaseRules:
+        - { type: perf, release: patch }
+        - { type: revert, release: patch }
+  - - "@semantic-release/release-notes-generator"
+    - preset: conventionalcommits
+  - - "@semantic-release/github"
+    - successCommentCondition: false
+      failCommentCondition: false
+      releasedLabels: false

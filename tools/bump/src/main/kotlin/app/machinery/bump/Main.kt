@@ -19,6 +19,8 @@ fun main() {
                 fetch(
                     "https://dl.google.com/android/repository/repository2-3.xml",
                 )?.let(Machinery::latestAndroidApi),
+            copilotCli = fetch(COPILOT_CLI_RELEASE)?.let(Machinery::releaseVersion),
+            claudeCode = fetch(CLAUDE_CODE_PACKAGE)?.let(Machinery::npmVersion),
         )
     val bumps = Machinery(File(".")).apply(latest)
     val report =
@@ -60,3 +62,6 @@ private fun fetch(url: String): String? =
 
 private const val TIMEOUT_S = 60L
 private val OK = 200..299
+
+private const val COPILOT_CLI_RELEASE = "https://api.github.com/repos/github/copilot-cli/releases/latest"
+private const val CLAUDE_CODE_PACKAGE = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"

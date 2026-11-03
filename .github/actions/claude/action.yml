@@ -1,0 +1,157 @@
+name: Claude
+description: >-
+  Runs Claude Code (Anthropic's Claude Code action) as the bot App, on the owner's Claude subscription
+  (CLAUDE_CODE_OAUTH_TOKEN) or an Anthropic API key, with the best model the plan has (Fable, or else Opus) at
+  extra-high effort, and Opus when that model is unavailable: never a smaller model. Without a Claude credential it
+  does nothing and "done" stays false. The bot App token has no Workflows permission, so Claude can't
+  change workflow files. Expects the app checked out without credentials or with the bot App's (git sends a
+  checkout's token on push before the bot App token this action sets), and the machinery checked out in .machinery.
+inputs:
+  prompt:
+    description: What Claude does
+    required: true
+  allowed-tools:
+    description: >-
+      Tools allowed on top of reading and editing files, Gradle and local git (comma-separated, Claude Code syntax),
+      e.g. Bash(git push:*) or Bash(gh pr comment:*)
+    default: ""
+  allowed-bots:
+    description: Bots whose events may start Claude (comma-separated logins)
+    default: ""
+  track-progress:
+    description: Keep a checklist comment on the issue or pull request
+    default: "false"
+  branch-prefix:
+    description: Prefix of the branch Claude creates for an issue
+    default: claude/
+  claude-code-oauth-token:
+    description: CLAUDE_CODE_OAUTH_TOKEN, from `claude setup-token`
+    default: ""
+  anthropic-api-key:
+    description: ANTHROPIC_API_KEY, instead of a subscription
+    default: ""
+  app-client-id:
+    description: The bot App's client ID
+    required: true
+  app-private-key:
+    description: The bot App's private key
+    required: true
+outputs:
+  done:
+    description: '"true" when Claude ran and finished'
+    value: ${{ steps.run.outputs.conclusion == 'success' }}
+  error:
+    description: Why Claude couldn't finish, when it ran and failed
+    value: ${{ steps.why.outputs.reason }}
+  out-of-credit:
+    description: '"true" when Claude failed because the plan''s usage limit or the API credit ran out'
+    value: ${{ steps.why.outputs.out-of-credit == 'true' }}
+  branch-name:
+    description: The branch Claude created for an issue, if any
+    value: ${{ steps.run.outputs.branch_name }}
+  app-token:
+    description: The bot App token Claude used
+    value: ${{ steps.token.outputs.token }}
+  response:
+    description: Claude's last answer, in Markdown, when it finished
+    value: ${{ steps.answer.outputs.text }}
+runs:
+  using: composite
+  steps:
+    - name: Check for a Claude credential
+      id: auth
+      shell: bash
+      env:
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        if [ -n "$CLAUDE_CODE_OAUTH_TOKEN$ANTHROPIC_API_KEY" ]; then
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::notice::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret, so Claude doesn't run (app-machinery docs/01-once-per-account.md)."
+        fi
+    - if: steps.auth.outputs.ready == 'true'
+      uses: ./.machinery/.github/actions/setup-build
+    - id: token
+      if: steps.auth.outputs.ready == 'true'
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-client-id }}
+        private-key: ${{ inputs.app-private-key }}
+        repositories: ${{ github.event.repository.name }}
+        permission-contents: write
+        permission-pull-requests: write
+        permission-issues: write
+    - id: run
+      if: steps.auth.outputs.ready == 'true'
+      uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        anthropic_api_key: ${{ inputs.anthropic-api-key }}
+        github_token: ${{ steps.token.outputs.token }}
+        allowed_bots: ${{ inputs.allowed-bots }}
+        track_progress: ${{ inputs.track-progress }}
+        branch_prefix: ${{ inputs.branch-prefix }}
+        # ./gradlew check takes longer than Claude Code's default two-minute limit for a command. Commands never run in
+        # the background: a run ends when Claude's turn does, killing a check still running there with the work not
+        # yet pushed (Fable did that twice on one issue, losing its commits with the runner)
+        settings: |
+          {"env": {"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "2700000",
+                   "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}}
+        # "best" is Fable on a plan that has it, Opus otherwise; a plan without Fable once got Fable anyway, which
+        # refused every run in 2 seconds, so check a run after a plan change (and set --model opus if that is back).
+        # The fallback only covers an overloaded or unavailable model, not a refused one or a used-up quota. The
+        # effort is explicit because Opus's own default is only "medium".
+        claude_args: >-
+          --model best --fallback-model opus --effort xhigh --permission-mode acceptEdits
+          --allowedTools "Bash(./gradlew:*),Bash(.machinery/.github/scripts/check-forbidden-names.sh:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git switch:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(head:*),Bash(tail:*)"
+          ${{ inputs.allowed-tools && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
+        prompt: ${{ inputs.prompt }}
+    # Claude's last word, which callers post (a CI fix code can't make, say)
+    - id: answer
+      if: steps.run.outcome == 'success'
+      shell: bash
+      run: |
+        file="$RUNNER_TEMP/claude-execution-output.json"
+        [ -s "$file" ] || exit 0
+        text="$(jq -r '([.[] | select(.type == "result")] | last | .result) // ""' "$file" | head -c 60000)"
+        delimiter="EOF-$(openssl rand -hex 8)"
+        printf 'text<<%s\n%s\n%s\n' "$delimiter" "$text" "$delimiter" >> "$GITHUB_OUTPUT"
+    # The action's log hides why Claude failed (show_full_output would print every tool result too), but its execution
+    # file keeps Claude Code's last word: that reason becomes the run's error and goes on Claude's comment
+    - id: why
+      if: ${{ !cancelled() && steps.run.outcome == 'failure' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        SCRIPTS: ${{ github.action_path }}/../../scripts
+      run: |
+        file="$RUNNER_TEMP/claude-execution-output.json"
+        reason=""
+        if [ -s "$file" ]; then
+          reason="$(jq -r '
+            ([.[] | select(.type == "result")] | last) as $result
+            | ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text] | last) as $said
+            | [$result.result, (($result.errors // []) | join(", ")), $said]
+            | map(select(type == "string" and length > 0)) | first // ""
+          ' "$file" | tr '\r\n' '  ' | cut -c1-500)"
+        fi
+        # Not "${reason:-...}": bash reads an apostrophe in that default as an opening quote
+        [ -n "$reason" ] || reason="Claude Code stopped without giving a reason: see this step's log."
+        echo "::error title=Claude couldn't finish::${reason//%/%25}"
+        echo "reason=$reason" >> "$GITHUB_OUTPUT"
+        if printf '%s' "$reason" | "$SCRIPTS/out-of-credit.sh"; then
+          echo "out-of-credit=true" >> "$GITHUB_OUTPUT"
+        fi
+        # Claude's comment on the issue or pull request links this run
+        if [ -n "$NUMBER" ]; then
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          comment="$(gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" --paginate \
+            --jq ".[] | select(.body | contains(\"$run_url\")) | .id" | tail -n 1)"
+          if [ -n "$comment" ]; then
+            body="$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$comment" --jq .body)"
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment" --silent \
+              -f body="$(printf '%s\n\n**Why:** %s' "$body" "$reason")" || true
+          fi
+        fi

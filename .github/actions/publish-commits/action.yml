@@ -1,0 +1,69 @@
+name: Publish commits
+description: >-
+  Pushes the commits an AI agent made locally (since `start`) to `branch` as the bot App and, for a new branch, opens
+  the pull request: titled by the first commit's subject (the agents write it to name the whole change), labelled, and
+  with `body`. The bot App token has no Workflows permission, so a commit that touches workflow files is refused.
+inputs:
+  token:
+    description: The bot App's token (contents and pull requests write)
+    required: true
+  branch:
+    description: The branch to push to
+    required: true
+  start:
+    description: The commit the agent started from
+    required: true
+  open-pull-request:
+    description: '"true" to open a pull request from the branch into the default branch'
+    default: "false"
+  labels:
+    description: The pull request's labels, comma-separated (created when missing)
+    default: agent,automerge
+  body:
+    description: The pull request's description
+    default: ""
+outputs:
+  pushed:
+    description: '"true" when there were commits and they were pushed'
+    value: ${{ steps.publish.outputs.pushed == 'true' }}
+  pull-request:
+    description: The pull request opened, if any
+    value: ${{ steps.publish.outputs.pull-request }}
+runs:
+  using: composite
+  steps:
+    - id: publish
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        BRANCH: ${{ inputs.branch }}
+        START: ${{ inputs.start }}
+        OPEN: ${{ inputs.open-pull-request }}
+        LABELS: ${{ inputs.labels }}
+        BODY: ${{ inputs.body }}
+        BASE: ${{ github.event.repository.default_branch }}
+      run: |
+        if [ -n "$(git status --porcelain -- . ':!.machinery')" ]; then
+          echo "::warning::The agent left changes it didn't commit, which are lost with this runner:"
+          git status --short -- . ':!.machinery'
+        fi
+        if [ "$(git rev-list --count "$START..HEAD")" -eq 0 ]; then
+          echo "The agent committed nothing."
+          exit 0
+        fi
+        git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+        echo "pushed=true" >> "$GITHUB_OUTPUT"
+        if [ "$OPEN" = "true" ]; then
+          title="$(git log --reverse --format=%s "$START..HEAD" | head -n 1)"
+          args=()
+          IFS=',' read -ra names <<< "$LABELS"
+          for name in "${names[@]}"; do
+            name="$(echo "$name" | xargs)"
+            [ -n "$name" ] || continue
+            gh label create "$name" > /dev/null 2>&1 || true
+            args+=(--label "$name")
+          done
+          url="$(gh pr create --base "$BASE" --head "$BRANCH" --title "$title" --body "$BODY" "${args[@]}")"
+          echo "pull-request=$url" >> "$GITHUB_OUTPUT"
+        fi

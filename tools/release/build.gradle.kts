@@ -18,7 +18,11 @@ val uploadListingScripts by tasks.registering(CreateStartScripts::class) {
     description = "Writes the start scripts of upload-listing, which replaces the Play listing's graphics that changed."
     mainClass = "app.machinery.release.UploadListingKt"
     applicationName = "upload-listing"
-    outputDir = layout.buildDirectory.dir("upload-listing-scripts").get().asFile
+    outputDir =
+        layout.buildDirectory
+            .dir("upload-listing-scripts")
+            .map { it.asFile }
+            .get()
     classpath = files(tasks.jar) + configurations.runtimeClasspath.get()
 }
 

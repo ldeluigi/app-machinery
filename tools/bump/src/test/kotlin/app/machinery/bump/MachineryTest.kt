@@ -3,6 +3,7 @@ package app.machinery.bump
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import java.io.File
 
 class MachineryTest :
@@ -43,6 +44,24 @@ class MachineryTest :
 
         test("unknown latest versions leave files untouched") {
             Machinery(repository()).apply(Latest(null, null)).none { it.changed } shouldBe true
+        }
+
+        test("the agents' tool versions pinned in the machinery move forward") {
+            val root = tempdir()
+            File(root, ".github/actions/copilot").mkdirs()
+            File(root, ".github/workflows").mkdirs()
+            File(root, ".github/actions/copilot/action.yml").writeText(
+                "inputs:\n  prompt:\n    required: true\n" +
+                    "  cli-version:\n    description: The CLI\n    default: 1.0.103\n",
+            )
+            File(root, ".github/workflows/release.yml").writeText("run: npm i -g @anthropic-ai/claude-code@2.1.303\n")
+            val latest = Latest(null, null, copilotCli = "1.0.110", claudeCode = "2.1.299")
+            val bumps = Machinery(root).apply(latest)
+            bumps.filter { it.changed }.map { it.name } shouldBe listOf("Copilot CLI")
+            File(root, ".github/actions/copilot/action.yml").readText() shouldContain "default: 1.0.110\n"
+            File(root, ".github/workflows/release.yml").readText() shouldContain "claude-code@2.1.303"
+            Machinery.releaseVersion("""{"tag_name": "v1.0.110"}""") shouldBe "1.0.110"
+            Machinery.npmVersion("""{"name":"x","version":"2.1.310"}""") shouldBe "2.1.310"
         }
 
         test("an app without the SDK levels in its catalog only gets its JDK bumped") {

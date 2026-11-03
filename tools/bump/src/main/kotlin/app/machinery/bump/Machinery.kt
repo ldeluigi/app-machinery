@@ -15,11 +15,14 @@ data class Bump(
 data class Latest(
     val jdkLts: Int?,
     val androidApi: Int?,
+    val copilotCli: String? = null,
+    val claudeCode: String? = null,
 )
 
 /**
  * Applies [latest] to the version files under [root] that it has: `.java-version` (the machinery's and every app's),
- * and the Android SDK levels in `gradle/libs.versions.toml` (the machinery's). Versions only ever move forward.
+ * the Android SDK levels in `gradle/libs.versions.toml`, and the Copilot CLI and Claude Code versions pinned in the
+ * machinery's own action and workflow. Versions only ever move forward.
  */
 class Machinery(
     private val root: File,
@@ -30,6 +33,8 @@ class Machinery(
             bumpFile(".java-version", "JDK LTS", latest.jdkLts?.toString()),
             bumpCatalog("android-compileSdk", "compileSdk", latest.androidApi),
             bumpCatalog("android-targetSdk", "targetSdk", latest.androidApi),
+            bumpPinned(COPILOT_ACTION, "Copilot CLI", COPILOT_PIN, latest.copilotCli),
+            bumpPinned(RELEASE_WORKFLOW, "Claude Code", CLAUDE_PIN, latest.claudeCode),
         )
 
     private fun bumpFile(
@@ -58,8 +63,33 @@ class Machinery(
         }
     }
 
+    /** The version [pin] finds in [path] (its first group), moved to [latest]. */
+    private fun bumpPinned(
+        path: String,
+        name: String,
+        pin: Regex,
+        latest: String?,
+    ): Bump? {
+        val file = File(root, path)
+        val text = if (file.exists()) file.readText() else ""
+        return pin.find(text)?.groups?.get(1)?.let { version ->
+            val current = version.value
+            val next = latest?.takeIf { isNewer(it, current) } ?: current
+            if (next != current) file.writeText(text.replaceRange(version.range, next))
+            Bump(name, current, next)
+        }
+    }
+
     companion object {
         private const val CATALOG = "gradle/libs.versions.toml"
+        private const val COPILOT_ACTION = ".github/actions/copilot/action.yml"
+        private const val RELEASE_WORKFLOW = ".github/workflows/release.yml"
+
+        /** The Copilot CLI version: the default of the copilot action's `cli-version` input. */
+        private val COPILOT_PIN = Regex("""cli-version:[^\n]*\n(?:[^\n]*\n)*?\s*default: (\d+(?:\.\d+)+)""")
+
+        /** The Claude Code version the release workflow installs to translate the notes. */
+        private val CLAUDE_PIN = Regex("""@anthropic-ai/claude-code@(\d+(?:\.\d+)+)""")
 
         /** Whether version [candidate] is newer than [current] (numeric comparison, `v` prefixes ignored). */
         fun isNewer(
@@ -69,12 +99,8 @@ class Machinery(
             fun parts(version: String) = version.removePrefix("v").split('.', '-').map { it.toIntOrNull() ?: 0 }
             val a = parts(candidate)
             val b = parts(current)
-            val diff =
-                (0 until maxOf(a.size, b.size)).map { (a.getOrElse(it) { 0 }) - (b.getOrElse(it) { 0 }) }.firstOrNull {
-                    it !=
-                        0
-                }
-            return (diff ?: 0) > 0
+            val diff = (0 until maxOf(a.size, b.size)).map { a.getOrElse(it) { 0 } - b.getOrElse(it) { 0 } }
+            return (diff.firstOrNull { it != 0 } ?: 0) > 0
         }
 
         /** The value of `key = "value"` in a TOML version catalog. */
@@ -105,5 +131,13 @@ class Machinery(
                 ?.groupValues
                 ?.get(1)
                 ?.toIntOrNull()
+
+        /** The version of a GitHub release's `tag_name`, without its `v`. */
+        fun releaseVersion(releaseJson: String): String? =
+            Regex(""""tag_name"\s*:\s*"v?([^"]+)"""").find(releaseJson)?.groupValues?.get(1)
+
+        /** The `version` of an npm registry document. */
+        fun npmVersion(packageJson: String): String? =
+            Regex(""""version"\s*:\s*"([^"]+)"""").find(packageJson)?.groupValues?.get(1)
     }
 }

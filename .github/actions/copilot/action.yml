@@ -1,0 +1,116 @@
+name: Copilot
+description: >-
+  Runs the GitHub Copilot CLI headless on the checked-out repository, on the owner's Copilot plan
+  (COPILOT_GITHUB_TOKEN), with the model Copilot picks itself (auto). Copilot edits and commits locally and pushes
+  nothing: the calling job pushes its commits as the bot App, whose token has no Workflows permission. Without the
+  token it does nothing and "done" stays false. The CLI's version is pinned below; the machinery's monthly refresh
+  moves it. Expects the machinery checked out in .machinery.
+inputs:
+  prompt:
+    description: What Copilot does
+    required: true
+  copilot-github-token:
+    description: COPILOT_GITHUB_TOKEN, a fine-grained token with the Copilot Requests permission
+    default: ""
+  allowed-commands:
+    description: Shell commands allowed on top of the usual ones, comma-separated, e.g. "gh release view,gh pr list"
+    default: ""
+  cli-version:
+    description: The Copilot CLI release (github/copilot-cli) to run
+    default: 1.0.103
+outputs:
+  done:
+    description: '"true" when Copilot ran and finished'
+    value: ${{ steps.run.outputs.done == 'true' }}
+  response:
+    description: Copilot's last answer, in Markdown
+    value: ${{ steps.run.outputs.response }}
+  error:
+    description: Why Copilot couldn't finish, when it ran and failed
+    value: ${{ steps.run.outputs.reason }}
+  out-of-credit:
+    description: '"true" when Copilot failed because the plan''s AI credits ran out'
+    value: ${{ steps.run.outputs.out-of-credit == 'true' }}
+runs:
+  using: composite
+  steps:
+    - name: Check for a Copilot token
+      id: auth
+      shell: bash
+      env:
+        COPILOT_GITHUB_TOKEN: ${{ inputs.copilot-github-token }}
+      run: |
+        if [ -n "$COPILOT_GITHUB_TOKEN" ]; then
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::notice::No COPILOT_GITHUB_TOKEN secret, so Copilot doesn't run (app-machinery docs/01-once-per-account.md)."
+        fi
+    - if: steps.auth.outputs.ready == 'true'
+      uses: ./.machinery/.github/actions/setup-build
+    - name: Install the Copilot CLI
+      if: steps.auth.outputs.ready == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION: ${{ inputs.cli-version }}
+      run: |
+        version="$VERSION"
+        dir="$RUNNER_TEMP/copilot-cli"
+        mkdir -p "$dir"
+        gh release download "v$version" --repo github/copilot-cli --dir "$dir" \
+          --pattern copilot-linux-x64.tar.gz --pattern SHA256SUMS.txt
+        (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS.txt && tar -xzf copilot-linux-x64.tar.gz)
+        echo "$dir" >> "$GITHUB_PATH"
+        echo "Copilot CLI $version"
+    # The same tools as Claude's (.github/actions/claude), plus reading the issue or pull request with the read-only
+    # workflow token. The CLI's GitHub MCP server is off: it would act with COPILOT_GITHUB_TOKEN, a user token.
+    - id: run
+      if: steps.auth.outputs.ready == 'true'
+      shell: bash
+      env:
+        COPILOT_GITHUB_TOKEN: ${{ inputs.copilot-github-token }}
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        COPILOT_AUTO_UPDATE: "false"
+        PROMPT: ${{ inputs.prompt }}
+        COMMANDS: ${{ inputs.allowed-commands }}
+        SCRIPTS: ${{ github.action_path }}/../../scripts
+      run: |
+        response="$RUNNER_TEMP/copilot-response.md"
+        log="$RUNNER_TEMP/copilot-errors.log"
+        status=0
+        extra=()
+        IFS=',' read -ra commands <<< "$COMMANDS"
+        for command in "${commands[@]}"; do
+          command="$(echo "$command" | xargs)"
+          [ -n "$command" ] && extra+=(--allow-tool "shell($command:*)")
+        done
+        copilot -p "$PROMPT" -s --no-ask-user --trust-folder --model auto --disable-builtin-mcps \
+          --allow-tool 'write' \
+          --allow-tool 'shell(./gradlew:*)' --allow-tool 'shell(.machinery/.github/scripts/check-forbidden-names.sh:*)' \
+          --allow-tool 'shell(git status:*)' --allow-tool 'shell(git diff:*)' --allow-tool 'shell(git log:*)' \
+          --allow-tool 'shell(git show:*)' --allow-tool 'shell(git switch:*)' --allow-tool 'shell(git add:*)' \
+          --allow-tool 'shell(git rm:*)' --allow-tool 'shell(git commit:*)' \
+          --allow-tool 'shell(gh issue view:*)' --allow-tool 'shell(gh pr view:*)' --allow-tool 'shell(gh pr diff:*)' \
+          --allow-tool 'shell(ls:*)' --allow-tool 'shell(cat:*)' --allow-tool 'shell(grep:*)' \
+          --allow-tool 'shell(head:*)' --allow-tool 'shell(tail:*)' "${extra[@]}" \
+          > "$response" 2> "$log" || status=$?
+        cat "$response"
+        delimiter="EOF-$(openssl rand -hex 8)"
+        printf 'response<<%s\n%s\n%s\n' "$delimiter" "$(head -c 60000 "$response")" "$delimiter" >> "$GITHUB_OUTPUT"
+        if [ "$status" -eq 0 ] && [ -s "$response" ]; then
+          echo "done=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        cat "$log" >&2
+        # "|| true": under pipefail, a log without any of these words would end the step here, before its outputs
+        reason="$(grep -iE 'error|fail|refus|denied|exceeded|insufficient|quota|credit|[^0-9](401|402|403|429)([^0-9]|$)' "$log" |
+          tail -n 2 | tr '\r\n' '  ' | cut -c1-500 || true)"
+        # Not "${reason:-...}": bash reads an apostrophe in that default as an opening quote
+        [ -n "$reason" ] || reason="The Copilot CLI stopped (exit code $status) without giving a reason: see this step's log."
+        echo "::error title=Copilot couldn't finish::${reason//%/%25}"
+        echo "reason=$reason" >> "$GITHUB_OUTPUT"
+        if printf '%s' "$reason" | "$SCRIPTS/out-of-credit.sh"; then
+          echo "out-of-credit=true" >> "$GITHUB_OUTPUT"
+        fi
+        exit 1
