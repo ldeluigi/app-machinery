@@ -1,0 +1,71 @@
+# Project overrides on top of the gradle-kotlin-qa defaults.
+comments:
+  UndocumentedPublicProperty:
+    active: false
+  # detekt skips test folders for these rules, as for those below that list `*tests`. Its own list of test folders
+  # predates Kotlin Multiplatform's newer ones (androidHostTest, iosSimulatorArm64Test...): "*Test" covers them all.
+  KDocReferencesNonPublicProperty:
+    excludes: &tests
+      - "**/test/**"
+      - "**/*Test/**"
+      - "**/androidTest/**"
+  UndocumentedPublicClass:
+    ignoreDefaultCompanionObject: true
+    excludes: *tests
+  UndocumentedPublicFunction:
+    excludes: *tests
+naming:
+  FunctionNaming:
+    excludes: *tests
+    ignoreAnnotated:
+      - Composable
+exceptions:
+  InstanceOfCheckForException:
+    excludes: *tests
+  ThrowingExceptionsWithoutMessageOrCause:
+    excludes: *tests
+  TooGenericExceptionCaught:
+    excludes: *tests
+performance:
+  ForEachOnRange:
+    excludes: *tests
+  SpreadOperator:
+    excludes: *tests
+potential-bugs:
+  LateinitUsage:
+    excludes: *tests
+  UnsafeCallOnNullableType:
+    excludes: *tests
+style:
+  UnusedPrivateFunction:
+    ignoreAnnotated:
+      - Preview
+  MagicNumber:
+    # Drawing code is full of tuned visual constants (alphas, wobble factors): exempt the UI layer.
+    excludes:
+      - "**/test/**"
+      - "**/*Test/**"
+      - "**/androidTest/**"
+      - "**/*.kts"
+      - "**/ui/**"
+    ignorePropertyDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreAnnotated:
+      - Preview
+complexity:
+  StringLiteralDuplication:
+    excludes: *tests
+  # Compose screens are declarative trees with many parameters by design.
+  LongMethod:
+    ignoreAnnotated:
+      - Composable
+  LongParameterList:
+    ignoreAnnotated:
+      - Composable
+  CyclomaticComplexMethod:
+    ignoreAnnotated:
+      - Composable
+  # View models expose one method per user action.
+  TooManyFunctions:
+    excludes: *tests
+    allowedFunctionsPerClass: 16

@@ -1,0 +1,30 @@
+name: Pull request title
+
+# A pull request's title becomes its commit on the default branch when it is squash-merged, which decides the release:
+# like every commit, it must be a Conventional Commit of 100 characters at most (commitlint would fail otherwise).
+# Apart from CI so that renaming a pull request checks the new title at once, without building it again.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Pull request title
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: At most 100 characters
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [ "${#TITLE}" -gt 100 ]; then
+            echo "::error::The title has ${#TITLE} characters: commitlint takes 100 at most."
+            exit 1
+          fi

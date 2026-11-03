@@ -1,0 +1,175 @@
+name: CI
+
+# The app's checks, on every pull request and every push to the default branch:
+# - Conventional commits: every commit message, as commitlint reads them (releases are made from them);
+# - Repository rules: no forbidden name (config/forbidden-names.txt), no issue number in a commit message, every action
+#   pinned to a commit SHA;
+# - Build and check: `./gradlew check` and a debug build (tests, static analysis, lint, licences);
+# - Emulator smoke test: the app's instrumented tests on an Android emulator, where runtime regressions are likeliest
+#   (the default branch, Gradle dependency updates, machinery refreshes).
+#
+# The app's own .github/workflows/ci.yml calls this one: see docs/02-new-app.md.
+
+on:
+  workflow_call:
+    inputs:
+      build:
+        description: The Gradle tasks that build and check the app
+        type: string
+        default: check assembleDebug --continue
+      android-app:
+        description: The Android application module, for the emulator smoke test
+        type: string
+        default: androidApp
+      emulator-api-level:
+        description: The Android version the smoke test runs on
+        type: number
+        default: 35
+
+permissions:
+  contents: read
+
+jobs:
+  commits:
+    name: Conventional commits
+    runs-on: ubuntu-latest
+    # Listing a pull request's commits needs pull request access in a private repository
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The machinery at the version the app calls (this workflow's own commit), for its scripts and actions
+      - &find-machinery
+        id: machinery
+        name: Find the machinery
+        env:
+          WORKFLOW: ${{ job.workflow_ref }}
+        run: echo "repository=${WORKFLOW%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+      - &checkout-machinery
+        name: Check out the machinery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.machinery.outputs.repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .machinery
+          persist-credentials: false
+      - uses: wagoid/commitlint-github-action@b948419dd99f3fd78a6548d48f94e3df7f6bf3ed # v6.2.1
+        with:
+          configFile: .machinery/.commitlintrc.yml
+
+  repository-rules:
+    name: Repository rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - *find-machinery
+      - *checkout-machinery
+      - name: The revisions to check
+        id: range
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "range=$BASE..HEAD" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=-1 HEAD" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Forbidden names in files and commit messages
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: |
+          echo ".machinery/" >> .git/info/exclude
+          if [ "$RANGE" = "-1 HEAD" ]; then
+            .machinery/.github/scripts/check-forbidden-names.sh
+          else
+            .machinery/.github/scripts/check-forbidden-names.sh "$RANGE"
+          fi
+      # A "Closes #12" in a commit ends up in the release notes and the stores' "What's new": the pull request's
+      # description closes the issue instead
+      - name: No issue numbers in commit messages
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        # Word splitting is wanted: "-1 HEAD" is two arguments
+        run: .machinery/.github/scripts/check-issue-references.sh $RANGE
+      - name: Actions pinned to commit SHAs
+        uses: zgosalvez/github-actions-ensure-sha-pinned-actions@76ed8a4c86957c2d27d44bab47f172193149d926 # v5.0.11
+
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - *find-machinery
+      - *checkout-machinery
+      - uses: ./.machinery/.github/actions/setup-build
+      - name: Static analysis, tests, lint and licences
+        env:
+          TASKS: ${{ inputs.build }}
+        # Word splitting is wanted: the tasks are separate arguments
+        run: ./gradlew $TASKS
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reports
+          path: "**/build/reports/"
+          retention-days: 14
+
+  emulator-smoke:
+    name: Emulator smoke test
+    needs: build
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) ||
+      startsWith(github.head_ref, 'dependabot/gradle/') ||
+      startsWith(github.head_ref, 'machinery/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - *find-machinery
+      - *checkout-machinery
+      - uses: ./.machinery/.github/actions/setup-build
+      # The emulator wants 1.2 times its data partition free (7.4 GB by default), more than the runner has left
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY/CodeQL"
+          df -h /
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          APP: ${{ inputs.android-app }}
+        with:
+          api-level: ${{ inputs.emulator-api-level }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          disk-size: 3G
+          # Gradle reports success when the app couldn't even be installed, so check that a test really ran
+          script: |
+            ./gradlew ":$APP:connectedDebugAndroidTest"
+            grep -q 'tests="[1-9]' "$APP"/build/outputs/androidTest-results/connected/debug/TEST-*.xml
+      - name: Upload the test report and logcat
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: emulator-reports
+          path: |
+            ${{ inputs.android-app }}/build/reports/androidTests/
+            ${{ inputs.android-app }}/build/outputs/androidTest-results/
+          retention-days: 14

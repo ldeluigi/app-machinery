@@ -1,0 +1,56 @@
+# Every version the machinery gives apps. Its Dependabot keeps them current; each machinery release carries them to the
+# apps, which pin one machinery version (docs/06-how-it-works.md).
+
+[versions]
+# Gradle plugins the conventions apply
+agp = "9.4.1"
+kotlin = "2.4.21"
+kotlin-qa = "1.10.1"
+git-semver = "7.0.25"
+licensee = "1.14.1"
+aboutlibraries = "15.3.0"
+compose-multiplatform = "1.12.2"
+compose-multiplatform-material3 = "1.9.0"
+kotest = "6.2.5"
+ksp = "2.3.13"
+# Libraries the conventions add to the apps' modules
+compose-bom = "2026.09.00"
+kotlinx-serialization = "1.11.0"
+junit4 = "4.13.2"
+robolectric = "4.17"
+# Unicode plural rules for the translation check (build only)
+icu4j = "78.3"
+# Android SDK levels: not library versions, bumped by the monthly machinery refresh
+android-compileSdk = "37"
+android-targetSdk = "37"
+android-minSdk = "26"
+
+[libraries]
+# Gradle plugins, the plugins build's own dependencies
+android-gradlePlugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+kotlin-serialization-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-serialization", version.ref = "kotlin" }
+compose-compiler-gradlePlugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
+kotlin-qa-gradlePlugin = { module = "org.danilopianini.gradle-kotlin-qa:org.danilopianini.gradle-kotlin-qa.gradle.plugin", version.ref = "kotlin-qa" }
+git-semver-gradlePlugin = { module = "org.danilopianini.git-sensitive-semantic-versioning:org.danilopianini.git-sensitive-semantic-versioning.gradle.plugin", version.ref = "git-semver" }
+licensee-gradlePlugin = { module = "app.cash.licensee:licensee-gradle-plugin", version.ref = "licensee" }
+aboutlibraries-gradlePlugin = { module = "com.mikepenz.aboutlibraries.plugin:com.mikepenz.aboutlibraries.plugin.gradle.plugin", version.ref = "aboutlibraries" }
+kotest-gradlePlugin = { module = "io.kotest:io.kotest.gradle.plugin", version.ref = "kotest" }
+ksp-gradlePlugin = { module = "com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin", version.ref = "ksp" }
+compose-multiplatform-gradlePlugin = { module = "org.jetbrains.compose:compose-gradle-plugin", version.ref = "compose-multiplatform" }
+icu4j = { module = "com.ibm.icu:icu4j", version.ref = "icu4j" }
+
+# Libraries the conventions add to the apps' modules (listed in plugins/build.gradle.kts)
+cmp-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
+cmp-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
+cmp-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-multiplatform-material3" }
+cmp-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose-multiplatform" }
+cmp-ui-tooling-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "compose-multiplatform" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotest-runner-junit5 = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
+kotest-framework-engine = { module = "io.kotest:kotest-framework-engine", version.ref = "kotest" }
+kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }

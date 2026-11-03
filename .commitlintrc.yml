@@ -1,0 +1,8 @@
+# Conventional Commits, as enforced locally by the commit-msg hook, checked in CI by commitlint.
+# Body and footer line limits are off: Dependabot writes long release-note lines.
+extends:
+  - "@commitlint/config-conventional"
+rules:
+  body-max-line-length: [0]
+  footer-max-line-length: [0]
+  subject-case: [0]

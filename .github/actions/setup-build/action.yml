@@ -1,0 +1,19 @@
+name: Set up build
+description: >-
+  Installs the JDK the app names in .java-version and Gradle, with GitHub's own cache (free for public and private
+  repositories alike). Only jobs on the default branch write the cache; the others read it.
+inputs:
+  cache-read-only:
+    description: Whether this job only reads the Gradle cache.
+    default: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      with:
+        distribution: temurin
+        java-version-file: .java-version
+    - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      with:
+        cache-provider: basic
+        cache-read-only: ${{ inputs.cache-read-only }}

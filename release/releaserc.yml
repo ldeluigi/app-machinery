@@ -1,0 +1,25 @@
+# semantic-release, as the release workflow runs it (an app can keep its own .releaserc.yml instead).
+# The version comes from the Conventional Commits since the last tag: feat -> minor; fix, perf, revert -> patch;
+# BREAKING CHANGE -> major; other types release nothing. The first release is 1.0.0.
+# @BRANCH@ and @APP@ (the Android application module) are filled in by the workflow.
+branches: ["@BRANCH@"]
+tagFormat: "v${version}"
+plugins:
+  - - "@semantic-release/commit-analyzer"
+    - preset: conventionalcommits
+      releaseRules:
+        - { type: perf, release: patch }
+        - { type: revert, release: patch }
+  - - "@semantic-release/release-notes-generator"
+    - preset: conventionalcommits
+  # Builds and signs the app for the version about to be tagged: a failed build stops the release before tagging.
+  - - "@semantic-release/exec"
+    - prepareCmd: "./gradlew :@APP@:bundleRelease :@APP@:assembleRelease -PreleaseVersion=${nextRelease.version}"
+  - - "@semantic-release/github"
+    - assets:
+        - { path: "@APP@/build/outputs/bundle/release/@APP@-release.aab", label: "Android App Bundle (Google Play)" }
+        - { path: "@APP@/build/outputs/apk/release/@APP@-release.apk", label: Android APK }
+        - { path: "@APP@/build/outputs/mapping/release/mapping.txt", label: R8 mapping }
+      successCommentCondition: false
+      failCommentCondition: false
+      releasedLabels: false
