@@ -1,0 +1,20 @@
+name: Self health
+
+# A failure of the machinery's own automation goes to the pinned "Automation health" issue, as an app's does.
+
+on:
+  workflow_run:
+    workflows: [Self automation, Self refresh]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    permissions:
+      issues: write
+      contents: read
+      actions: read
+      checks: read
+    uses: ./.github/workflows/health.yml

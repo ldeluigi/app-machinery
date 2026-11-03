@@ -1,0 +1,12 @@
+agent	1D76DB	Opened by an AI agent
+automerge	0E8A16	Merge automatically once CI is green
+claude	C15F3C	Claude agent responsibility
+copilot	444444	GitHub Copilot responsibility
+ios	0E8A16	Run the iOS build and tests on this pull request
+machinery-review	5319E7	Monthly refresh: the agent reviews it
+major-update	B60205	Major dependency update
+needs-human	D93F0B	Automation could not handle this
+retry next week	FBCA04	The AI agents ran out of credit: they try again on Monday
+autofix-1	FBCA04	CI-fix agent attempt 1
+autofix-2	FBCA04	CI-fix agent attempt 2
+autofix-3	FBCA04	CI-fix agent attempt 3

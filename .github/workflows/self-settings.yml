@@ -1,0 +1,53 @@
+name: Self settings
+
+# Keeps the settings of every repository the bot App is installed on (the apps and the machinery itself) as settings/
+# says, monthly, by hand, and whenever settings/ changes. Needs the App's Administration: write permission
+# (docs/01-once-per-account.md). From a computer, .github/scripts/apply-settings.sh does the same for one repository.
+
+on:
+  schedule:
+    - cron: "47 3 2 * *"
+  push:
+    branches: [main]
+    paths:
+      - settings/**
+      - .github/scripts/apply-settings.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-settings
+
+jobs:
+  apply:
+    name: Apply the settings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Every repository the App is installed on, with the permissions the settings need
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-administration: write
+          permission-issues: write
+          permission-environments: write
+      - name: Apply
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          status=0
+          for repo in $(gh api /installation/repositories --paginate --jq '.repositories[] | select(.archived | not) | .full_name'); do
+            if [ "$repo" = "$GITHUB_REPOSITORY" ]; then
+              .github/scripts/apply-settings.sh "$repo" settings/ruleset-machinery.json || status=1
+            else
+              .github/scripts/apply-settings.sh "$repo" || status=1
+            fi
+          done
+          exit $status

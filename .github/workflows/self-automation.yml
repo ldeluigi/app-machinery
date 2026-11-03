@@ -1,0 +1,60 @@
+name: Self automation
+
+# The machinery looks after itself with its own reusable workflows, as an app does: pull request titles and auto-merge
+# for Dependabot's and the bot's pull requests, a retry of failed runs, then the CI-fix agent, and the issue agent.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, labeled]
+  workflow_run:
+    workflows: [Self CI, Self release, Self refresh]
+    types: [completed]
+  issues:
+    types: [opened, labeled, unlabeled]
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "30 8 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+    uses: ./.github/workflows/pull-request-title.yml
+
+  automerge:
+    if: github.event_name == 'pull_request' && github.event.action != 'edited'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/automerge.yml
+    secrets: inherit
+
+  retry:
+    if: github.event_name == 'workflow_run' || github.event_name == 'schedule'
+    permissions:
+      actions: write
+      contents: read
+    uses: ./.github/workflows/retry.yml
+    secrets: inherit
+
+  ci-fix:
+    if: github.event_name == 'workflow_run'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/ci-fix-agent.yml
+    secrets: inherit
+
+  issues:
+    if: github.event_name == 'issues' || github.event_name == 'issue_comment'
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    uses: ./.github/workflows/issue-agent.yml
+    secrets: inherit
