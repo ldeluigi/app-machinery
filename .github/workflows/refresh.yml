@@ -153,7 +153,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           NUMBER: ${{ needs.refresh.outputs.number }}
           DONE: ${{ steps.agent.outputs.done }}
-          ANSWER: ${{ steps.agent.outputs.response || format('No agent could review the refresh: {0}', steps.agent.outputs.error || 'neither Claude nor Copilot is set up.') }}
+          ANSWER: "${{ steps.agent.outputs.response || format('No agent could review the refresh: {0}', steps.agent.outputs.error || 'neither Claude nor Copilot is set up.') }}"
         run: |
           gh pr comment "$NUMBER" --body "$ANSWER"
           # What only the owner can do becomes one issue a month, unless one with that title is still open

@@ -86,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.pull_request.number }}
-          ANSWER: ${{ steps.agent.outputs.response || format('The upgrade agent could not run: {0}', steps.agent.outputs.error) }}
+          ANSWER: "${{ steps.agent.outputs.response || format('The upgrade agent could not run: {0}', steps.agent.outputs.error) }}"
           OPENED: ${{ steps.agent.outputs.pull-request }}
         run: |
           body="$ANSWER"

@@ -165,7 +165,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           WORKFLOW: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
-          ANSWER: ${{ steps.agent.outputs.response || format('No agent could look at it: {0}', steps.agent.outputs.error || 'neither Claude nor Copilot is set up.') }}
+          ANSWER: "${{ steps.agent.outputs.response || format('No agent could look at it: {0}', steps.agent.outputs.error || 'neither Claude nor Copilot is set up.') }}"
         run: |
           gh issue create --title "Automation needs a human: $WORKFLOW failed" \
             --body "$(printf '[%s failed twice](%s), and no fix came of it.\n\n%s' "$WORKFLOW" "$RUN_URL" "$ANSWER")"
