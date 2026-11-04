@@ -1,8 +1,11 @@
+import dev.detekt.gradle.Detekt
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jlleitschuh.gradle.ktlint.KtlintExtension
 
 plugins {
     `kotlin-dsl`
     `maven-publish`
+    alias(libs.plugins.kotlin.qa) apply false
 }
 
 group = "app.machinery"
@@ -38,9 +41,19 @@ dependencies {
 val catalog = versionCatalogs.named("libs")
 val libraries =
     listOf(
-        "cmp-foundation", "cmp-ui", "cmp-material3", "cmp-resources", "cmp-ui-tooling-preview", "compose-bom",
-        "kotlinx-serialization-json", "kotest-runner-junit5", "kotest-framework-engine", "kotest-assertions-core",
-        "kotest-property", "junit4", "robolectric",
+        "cmp-foundation",
+        "cmp-ui",
+        "cmp-material3",
+        "cmp-resources",
+        "cmp-ui-tooling-preview",
+        "compose-bom",
+        "kotlinx-serialization-json",
+        "kotest-runner-junit5",
+        "kotest-framework-engine",
+        "kotest-assertions-core",
+        "kotest-property",
+        "junit4",
+        "robolectric",
     ).associateWith { alias ->
         val library = catalog.findLibrary(alias).get().get()
         "${library.module}:${library.versionConstraint.requiredVersion}"
@@ -84,7 +97,44 @@ publishing {
         // A Maven repository in a folder, which the release workflow publishes on the machinery's GitHub Pages
         maven {
             name = "site"
-            url = uri(providers.gradleProperty("machinery.repository").getOrElse(layout.buildDirectory.dir("repository").get().asFile.path))
+            url =
+                uri(
+                    providers
+                        .gradleProperty(
+                            "machinery.repository",
+                        ).getOrElse(
+                            layout.buildDirectory
+                                .dir("repository")
+                                .get()
+                                .asFile.path,
+                        ),
+                )
         }
     }
+}
+
+// The plugins pass the checks they give the apps (gradle-kotlin-qa, with the machinery's detekt settings on top of its
+// defaults), on their hand-written code only: Gradle's accessors for the precompiled scripts and the catalog above are
+// generated into build/.
+// gradle-kotlin-qa sets itself up once per Kotlin plugin, and kotlin-dsl applies two (Kotlin's JVM plugin and its API
+// plugin): the second time, it stops at registering its extension again, every check being set up by the first. That
+// one error is let through, until gradle-kotlin-qa guards against it.
+runCatching { apply(plugin = "org.danilopianini.gradle-kotlin-qa") }.onFailure { failure ->
+    val setUpTwice =
+        generateSequence(failure) { it.cause }.any {
+            "extension with name 'kotlinQA'" in
+                it.message.orEmpty()
+        }
+    if (!setUpTwice) throw failure
+}
+val generated = layout.buildDirectory.get().asFile
+afterEvaluate {
+    tasks.withType<Detekt>().configureEach {
+        config.setFrom(layout.buildDirectory.file("kotlinqa/detekt.yml"), "src/main/resources/machinery/detekt.yml")
+    }
+}
+tasks.withType<Detekt>().configureEach { exclude { it.file.startsWith(generated) } }
+configure<KtlintExtension> { filter { exclude { it.file.startsWith(generated) } } }
+tasks.withType<SourceTask>().matching { it.name == "cpdKotlinCheck" }.configureEach {
+    setSource(fileTree("src") { include("**/*.kt") })
 }

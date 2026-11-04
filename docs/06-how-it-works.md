@@ -48,7 +48,8 @@ brings them all, tested together. The app's own catalog lists only the libraries
 - **Dependabot** bumps the actions and the Gradle plugins and libraries of its catalog, weekly, as `fix` commits.
 - **Self automation** bumps what Dependabot can't see, monthly, and applies `settings/` to every app.
 - **Self CI** checks every change: actionlint (with shellcheck), pinned actions, Conventional Commits, the plugins' and
-  tools' builds and tests, and the template's build with the change's plugins. Then it releases (below).
+  tools' builds, tests and gradle-kotlin-qa's checks, and the template's build with the change's plugins. Then it
+  releases (below).
 - Its own automation merges Dependabot's and the bot's pull requests once green, re-runs failures, and gives the rest
   to the CI-fix agent, as for an app.
 - **Self CI**, on `main`, tags each `feat` or `fix` and publishes the plugins of that version. Dependabot then offers it to

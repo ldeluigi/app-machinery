@@ -29,6 +29,7 @@ abstract class GenerateAppInfo : DefaultTask() {
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
 
+    /** Writes the `AppInfo` object into the generated sources. */
     @TaskAction
     fun generate() {
         val directory = outputDir.get().asFile.resolve(packageName.get().replace('.', '/'))

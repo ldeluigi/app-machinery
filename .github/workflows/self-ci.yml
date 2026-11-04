@@ -59,8 +59,8 @@ jobs:
       - uses: ./.github/actions/setup-build
       - name: Build, test and check
         run: ./gradlew build --continue
-      - name: The plugins publish
-        run: ./gradlew -p plugins publish
+      - name: The plugins build, pass their checks and publish
+        run: ./gradlew -p plugins check publish --continue
       - name: Upload reports
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

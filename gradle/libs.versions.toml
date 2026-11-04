@@ -54,3 +54,7 @@ kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+
+[plugins]
+# The machinery's own builds
+kotlin-qa = { id = "org.danilopianini.gradle-kotlin-qa", version.ref = "kotlin-qa" }

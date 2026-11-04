@@ -23,5 +23,6 @@ before changing anything.
 
 ## Before pushing
 
-Run `./gradlew build` (the plugins and tools, with their tests, detekt and ktlint) and make it pass. Scripts in
-`.github/scripts/` pass `shellcheck`.
+Run `./gradlew build` (the tools, with their tests and gradle-kotlin-qa's checks: detekt, ktlint, copy-paste) and
+`./gradlew -p plugins check` (the plugins, with the same checks), and make them pass. Scripts in `.github/scripts/`
+pass `shellcheck`.

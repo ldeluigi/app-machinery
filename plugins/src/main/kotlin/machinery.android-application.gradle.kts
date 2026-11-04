@@ -72,7 +72,9 @@ val localeConfig =
         outputDir = layout.buildDirectory.dir("generated/localeConfig")
     }
 androidComponents {
-    onVariants { variant -> variant.sources.res?.addGeneratedSourceDirectory(localeConfig, GenerateLocaleConfig::outputDir) }
+    onVariants { variant ->
+        variant.sources.res?.addGeneratedSourceDirectory(localeConfig, GenerateLocaleConfig::outputDir)
+    }
 }
 
 allowOpenSourceLicences()

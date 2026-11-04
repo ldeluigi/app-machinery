@@ -41,6 +41,7 @@ abstract class CheckTranslations : DefaultTask() {
     @get:OutputFile
     abstract val report: RegularFileProperty
 
+    /** Compares each translation with the default texts and fails, listing what differs, if anything does. */
     @TaskAction
     fun check() {
         val root = resources.get().asFile
@@ -54,7 +55,8 @@ abstract class CheckTranslations : DefaultTask() {
                     .flatMap { folder ->
                         val texts = readTexts(folder)
                         val tag = ResourceQualifiers.languageTag(folder.name.removePrefix("values-"))
-                        compare(folder.name, default, texts) + (tag?.let { pluralForms(folder.name, it, texts) }.orEmpty())
+                        compare(folder.name, default, texts) +
+                            (tag?.let { pluralForms(folder.name, it, texts) }.orEmpty())
                     }
         report.get().asFile.writeText(problems.joinToString("\n", postfix = if (problems.isEmpty()) "" else "\n"))
         if (problems.isNotEmpty()) {
@@ -89,10 +91,23 @@ abstract class CheckTranslations : DefaultTask() {
             translated.values.forEach { text ->
                 val original = default[text.name]
                 when {
-                    original == null -> add("$language: '${text.name}' is not in the default language")
-                    !original.translatable -> add("$language: '${text.name}' must not be translated")
-                    original.kind != text.kind -> add("$language: '${text.name}' is a ${text.kind}, not a ${original.kind}")
-                    else -> addAll(differences(language, original, text))
+                    original == null -> {
+                        add("$language: '${text.name}' is not in the default language")
+                    }
+
+                    !original.translatable -> {
+                        add("$language: '${text.name}' must not be translated")
+                    }
+
+                    original.kind != text.kind -> {
+                        add(
+                            "$language: '${text.name}' is a ${text.kind}, not a ${original.kind}",
+                        )
+                    }
+
+                    else -> {
+                        addAll(differences(language, original, text))
+                    }
                 }
             }
         }

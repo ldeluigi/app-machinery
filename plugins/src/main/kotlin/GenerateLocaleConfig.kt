@@ -30,6 +30,7 @@ abstract class GenerateLocaleConfig : DefaultTask() {
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
 
+    /** Writes `xml/locales_config.xml`: the default language, then the translations. */
     @TaskAction
     fun generate() {
         val translations =

@@ -2,6 +2,7 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
@@ -15,6 +16,7 @@ import org.gradle.api.tasks.TaskAction
  * platforms: its name, bundle id, team and version (`Generated.xcconfig`), and its `Info.plist`, filled in from a
  * template with the languages of the shared Compose resources.
  */
+@CacheableTask
 abstract class GenerateIosProjectFiles : DefaultTask() {
     /** The name the players see. */
     @get:Input
@@ -58,11 +60,14 @@ abstract class GenerateIosProjectFiles : DefaultTask() {
     @get:OutputFile
     abstract val plist: RegularFileProperty
 
+    /** Writes `Generated.xcconfig` and the `Info.plist`. */
     @TaskAction
     fun generate() {
         xcconfig.get().asFile.apply { parentFile.mkdirs() }.writeText(
             buildString {
-                appendLine("// Written by `./gradlew :composeApp:iosProjectFiles` from gradle.properties and git: don't edit.")
+                appendLine(
+                    "// Written by `./gradlew :composeApp:iosProjectFiles` from gradle.properties and git: don't edit.",
+                )
                 appendLine("APP_NAME = ${appName.get()}")
                 appendLine("APP_ID = ${appId.get()}")
                 appendLine("MARKETING_VERSION = ${marketingVersion.get()}")
@@ -77,7 +82,11 @@ abstract class GenerateIosProjectFiles : DefaultTask() {
                 .joinToString("\n") { "\t\t<string>$it</string>" }
         val template = plistTemplate.get().asFile.readText()
         check(MARKER in template) { "The Info.plist template has no $MARKER line" }
-        plist.get().asFile.apply { parentFile.mkdirs() }.writeText(template.replace(MARKER, languages))
+        plist
+            .get()
+            .asFile
+            .apply { parentFile.mkdirs() }
+            .writeText(template.replace(MARKER, languages))
     }
 
     private fun translations(): List<String> =

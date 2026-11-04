@@ -7,21 +7,6 @@ import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 
-/** The app's identity, from `app.*` in gradle.properties: see there. */
-internal data class AppIdentity(
-    val name: String,
-    val id: String,
-    val codePackage: String,
-    val locale: String,
-)
-
-internal val Project.app: AppIdentity
-    get() {
-        fun property(key: String) =
-            checkNotNull(providers.gradleProperty("app.$key").orNull) { "Set app.$key in gradle.properties" }
-        return AppIdentity(property("name"), property("id"), property("package"), property("locale"))
-    }
-
 /**
  * A library the conventions add to the app's modules, as `group:name:version` from the machinery's own version
  * catalog (gradle/libs.versions.toml of app-machinery), so that apps get them with the machinery's version.
@@ -33,12 +18,13 @@ internal fun int(alias: String): Int = MachineryCatalog.versions.getValue(alias)
 
 /** JDK used for toolchains, read from the repository-wide `.java-version` file (kept current by CI). */
 internal val Project.javaVersion: Int
-    get() = rootProject.layout.projectDirectory
-        .file(".java-version")
-        .asFile
-        .readText()
-        .trim()
-        .toInt()
+    get() =
+        rootProject.layout.projectDirectory
+            .file(".java-version")
+            .asFile
+            .readText()
+            .trim()
+            .toInt()
 
 /**
  * Adds the machinery's detekt settings on top of the gradle-kotlin-qa defaults, and the app's own
@@ -56,13 +42,17 @@ internal fun Project.useProjectDetektConfig() {
             outputs.file(output)
             doLast {
                 val text = checkNotNull(MachineryCatalog::class.java.getResource("/machinery/detekt.yml")).readText()
-                output.get().asFile.apply { parentFile.mkdirs() }.writeText(text)
+                output
+                    .get()
+                    .asFile
+                    .apply { parentFile.mkdirs() }
+                    .writeText(text)
             }
         }
     afterEvaluate {
         tasks.withType(Detekt::class.java).configureEach {
             dependsOn(write)
-            config.setFrom(listOfNotNull(defaults, machinery, app.takeIf { it.asFile.exists() }))
+            config.setFrom(listOfNotNull(defaults, machinery, app.takeIf { file -> file.asFile.exists() }))
         }
     }
 }
@@ -80,7 +70,9 @@ internal fun Project.allowOpenSourceLicences() {
         allow("BSD-3-Clause")
         allow("CC0-1.0")
         allowUrl("https://developer.android.com/guide/playcore/license") { because("Google Play in-app updates") }
-        allowUrl("https://developer.android.com/studio/terms.html") { because("Play services runtime of in-app updates") }
+        allowUrl("https://developer.android.com/studio/terms.html") {
+            because("Play services runtime of in-app updates")
+        }
     }
 }
 
