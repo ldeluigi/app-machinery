@@ -1,0 +1,7 @@
+# actionlint settings (Self CI runs it on every change).
+paths:
+  .github/workflows/**/*.yml:
+    ignore:
+      # GitHub gives jobs job.workflow_ref and job.workflow_sha (the reusable workflow's own), which actionlint does
+      # not know yet: the reusable workflows check out the machinery at their own version with them.
+      - property "workflow_(ref|sha)" is not defined

@@ -902,8 +902,8 @@ jobs:
           branch="machinery/$(date -u +%Y-%m)"
           title="build(machinery): monthly refresh"
           id="$(gh api "/users/$SLUG%5Bbot%5D" --jq .id)"
-          git config user.name "$SLUG[bot]"
-          git config user.email "$id+$SLUG[bot]@users.noreply.github.com"
+          git config user.name "${SLUG}[bot]"
+          git config user.email "$id+${SLUG}[bot]@users.noreply.github.com"
           git switch -c "$branch"
           # build/ (the report) is git-ignored: naming it, even to exclude it, makes git add fail
           git add -A

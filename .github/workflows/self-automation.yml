@@ -98,8 +98,8 @@ jobs:
         run: |
           branch="machinery/$(date -u +%Y-%m)"
           id="$(gh api "/users/$SLUG%5Bbot%5D" --jq .id)"
-          git config user.name "$SLUG[bot]"
-          git config user.email "$id+$SLUG[bot]@users.noreply.github.com"
+          git config user.name "${SLUG}[bot]"
+          git config user.email "$id+${SLUG}[bot]@users.noreply.github.com"
           git switch -c "$branch"
           git add -A
           git commit -m "fix(deps): the monthly bump of the JDK, Android SDK and agent tools"
