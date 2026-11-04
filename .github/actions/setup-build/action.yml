@@ -13,7 +13,25 @@ runs:
       with:
         distribution: temurin
         java-version-file: .java-version
+    # Gradle's downloads and caches, keyed on the build's files. A change to them (a version bump, say) starts from the
+    # newest earlier cache and downloads only what changed: setup-gradle's own cache restores exact matches only, so
+    # every bump started from nothing. Gradle deletes what no build used for 30 days, so the cache doesn't grow forever.
+    - if: inputs.cache-read-only != 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.gradle.kts', '**/gradle/*.versions.toml', '**/gradle-wrapper.properties', '.java-version') }}
+        restore-keys: gradle-${{ runner.os }}-${{ runner.arch }}-
+    - if: inputs.cache-read-only == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.gradle.kts', '**/gradle/*.versions.toml', '**/gradle-wrapper.properties', '.java-version') }}
+        restore-keys: gradle-${{ runner.os }}-${{ runner.arch }}-
     - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       with:
-        cache-provider: basic
-        cache-read-only: ${{ inputs.cache-read-only }}
+        cache-disabled: true

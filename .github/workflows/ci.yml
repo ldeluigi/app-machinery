@@ -292,11 +292,19 @@ jobs:
       - *find-machinery
       - *checkout-machinery
       - *setup-build
+      # Kotlin/Native's toolchain and library caches belong to the Kotlin version (the machinery's catalog names it), so
+      # they survive the app's other changes
+      - id: kotlin
+        name: Find the Kotlin version
+        run: |
+          version="$(sed -n 's/^kotlin = "\(.*\)"$/\1/p' .machinery/gradle/libs.versions.toml)"
+          [ -n "$version" ] || { echo "::error::The machinery's catalog names no Kotlin version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Cache the Kotlin/Native toolchain
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.kotlin.outputs.version }}
       - name: Pick a simulator
         id: simulator
         run: |
@@ -651,11 +659,19 @@ jobs:
       - *find-machinery
       - *checkout-machinery
       - *setup-build
+      # Kotlin/Native's toolchain and library caches belong to the Kotlin version (the machinery's catalog names it), so
+      # they survive the app's other changes
+      - id: kotlin
+        name: Find the Kotlin version
+        run: |
+          version="$(sed -n 's/^kotlin = "\(.*\)"$/\1/p' .machinery/gradle/libs.versions.toml)"
+          [ -n "$version" ] || { echo "::error::The machinery's catalog names no Kotlin version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Cache the Kotlin/Native toolchain
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.kotlin.outputs.version }}
       - name: Generate the Xcode project
         run: |
           brew install xcodegen
