@@ -19,7 +19,7 @@ kotlinx-serialization = "1.11.0"
 junit4 = "4.13.2"
 robolectric = "4.17"
 # Unicode plural rules for the translation check (build only)
-icu4j = "78.3"
+icu4j = "79.1"
 # Android SDK levels: not library versions, bumped by the monthly machinery refresh
 android-compileSdk = "37"
 android-targetSdk = "37"
