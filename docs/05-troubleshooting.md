@@ -14,6 +14,8 @@ are the ones that land on you, with what to do.
 | Store listing fails with 403 | No **Manage store presence** for the service account | As above. |
 | "The job was not acquired by Runner" on the iOS job | GitHub's macOS runners were busy | Re-run the job; it isn't a code problem. |
 | The iOS UI test can't find the home screen | The app crashed or was too slow to draw | The run's `ios-screenshots` artifact holds a screen recording (`.mp4`) and the crash report (`.ips`). |
+| "Upload to TestFlight" fails with "No profiles for ..." or a bundle identifier error | The app's id isn't registered with Apple, or the API key hasn't Admin access | docs/02-new-app.md step 10a; the key needs **Admin**. Then **Re-run failed jobs**. |
+| The upload fails with "No suitable application records were found" | The app has no App Store Connect record yet | Make it (docs/02-new-app.md step 10a), then **Re-run failed jobs**. |
 | A commit is refused by CI: "header must not be longer than 100 characters" | A commit subject over 100 characters (the local hook doesn't count them) | Shorten it. A branch can't be force-pushed by the agents: open a new pull request from a rebuilt branch. |
 | A release made nothing | Only `build`, `ci`, `docs`, `refactor`, `test` or `chore` commits since the last one | Expected: `feat`, `fix`, `perf` and `revert` release. |
 | "What's new" stayed in English | No Claude token for the release, or the translation failed | The run's warnings say why. The next release translates again. |

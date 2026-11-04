@@ -143,8 +143,31 @@ Each pull request labelled `ios`, and every push to `main` that touches code, bu
 runs its UI tests on a simulator. Its screenshots, screen recording and any crash report are the run's
 `ios-screenshots` artifact.
 
-Releasing on the App Store comes with the machinery's iOS release workflow (TestFlight, then the App Store). Until then,
-Apple's steps of `docs/01-once-per-account.md` (step 8) are all there is to do.
+### 10a. TestFlight
+
+Once these are done, every release also goes to TestFlight, Apple's beta testing app, by itself. You need Apple's steps
+of `docs/01-once-per-account.md` (step 8) first: the Developer Program, the Team ID and the API key.
+
+- [ ] **Register the app's id**: <https://developer.apple.com/account/resources/identifiers/list> → **+** → **App IDs**
+      → Continue → **App** → Continue. Description: the app's name; **Bundle ID: Explicit**, `<app.id>`. Register.
+- [ ] **Make its App Store Connect record**: <https://appstoreconnect.apple.com/apps> → **+** → **New App**. Platform
+      **iOS**, the name players see (it must be free on the App Store), its primary language, the bundle id you just
+      registered, and any SKU (the app id will do). User access: **Full Access**. Create.
+- [ ] **Store the keys**, the Team ID last, since it turns the uploads on:
+      `.github/scripts/set-secrets.sh <owner>/<repo> ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY APPLE_TEAM_ID`
+      (drag the `.p8` file onto the window for `ASC_PRIVATE_KEY`).
+- [ ] Merge a `feat:` or `fix:` pull request. After the release, **Upload to TestFlight** archives the app, signs it
+      through Apple's cloud signing (no certificates to keep) and uploads it. App Store Connect takes 10 to 30
+      minutes to process it, then emails you.
+- [ ] **Testers**: in App Store Connect → the app → **TestFlight**.
+  - People in your team (up to 100): **Internal Testing → +**, a group, add them. Someone outside the team first needs
+    an App Store Connect account: **Users and Access → +**, their Apple Account email, role **Marketing** (it sees
+    the least), and they accept the email. Internal builds need no review.
+  - Anyone else (up to 10,000): **External Testing → +**, a group, then **Public Link**. Each version's first build
+    goes through Apple's beta review, usually within a day.
+  - Testers install **TestFlight** from the App Store on their iPhone and open the invitation.
+
+Submitting to the App Store itself comes with a later machinery release.
 
 ## 11. The app's own extras
 

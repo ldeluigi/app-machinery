@@ -3,9 +3,9 @@
 Everything that builds, checks, releases and looks after Kotlin Multiplatform apps (Android and iOS), shared by every
 app so that each one keeps almost nothing of its own:
 
-- **Workflows** that the apps call: CI, the iOS build, releases to Google Play with translated "What's new", the store
-  listing's graphics, auto-merge, and AI agents (Claude Code, with the Copilot CLI as a fallback) that take issues, fix
-  failing builds, adopt major updates and review a monthly refresh.
+- **Workflows** that the apps call: CI, the iOS build, releases to Google Play with translated "What's new" and to
+  TestFlight, the store listing's graphics, auto-merge, and AI agents (Claude Code, with the Copilot CLI as a fallback)
+  that take issues, fix failing builds, adopt major updates and review a monthly refresh.
 - **Gradle plugins** that the apps build with: Kotlin Multiplatform, Compose Multiplatform, the Android app, static
   analysis (detekt, ktlint, copy-paste check), licence checks, translation checks, and the iOS project's settings.
 - **Repository settings as code**: merge options, labels, the `release` environment and the default branch's rules,

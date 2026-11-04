@@ -24,6 +24,8 @@ name: CI
 #   `PLAY_TRACK` variable is set);
 # - Google Play listing graphics: the app's StoreArtTest draws them, and the ones that changed are replaced. A run
 #   started by hand with `store-listing` does only this, on the default branch.
+# - Upload to TestFlight: the iOS app of the release, archived and signed by Apple's cloud signing with the App Store
+#   Connect API key, for the testers (once the `APPLE_TEAM_ID` variable is set).
 #
 # The app's .github/workflows/ci.yml calls this one: see docs/02-new-app.md.
 
@@ -620,3 +622,83 @@ jobs:
           PLAY_ACCESS_TOKEN: ${{ steps.wif.outputs.access_token || steps.key.outputs.access_token }}
           ART: ${{ inputs.art-dir }}
         run: .machinery/tools/release/build/install/release/bin/upload-listing "$ART"
+
+  testflight:
+    name: Upload to TestFlight
+    needs: release
+    # APPLE_TEAM_ID switches the upload on: it stays unset until the app's record exists in App Store Connect
+    # (docs/02-new-app.md), since uploads for an app App Store Connect doesn't know only fail.
+    if: needs.release.outputs.published == 'true' && vars.APPLE_TEAM_ID != ''
+    runs-on: macos-latest
+    environment: release
+    # The release build of the Kotlin framework, then the archive
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      APP: ${{ inputs.ios-app }}
+      # The team signs, and the version is the release's, in every Gradle run (Xcode's included)
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      ORG_GRADLE_PROJECT_releaseVersion: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }}
+          fetch-depth: 0
+          persist-credentials: false
+      - *find-machinery
+      - *checkout-machinery
+      - *setup-build
+      - name: Cache the Kotlin/Native toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd "$APP" && xcodegen generate
+      # Apple's cloud signing: with the App Store Connect API key (Admin access), Xcode makes the certificates and
+      # profiles it needs, so no signing material is kept anywhere.
+      - name: Write the App Store Connect API key
+        env:
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: printf '%s\n' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+      - name: Archive the app
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild archive \
+            -project "$APP/App.xcodeproj" -scheme App -configuration Release \
+            -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+      - name: Sign it for the App Store and upload it to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+      - name: Remove the API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"

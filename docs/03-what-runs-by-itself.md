@@ -12,7 +12,7 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 | Pushes to `main`, Dependabot's Gradle updates, refreshes | CI → Emulator smoke test | The instrumented tests on an Android emulator |
 | Pushes to `main` touching code, pull requests labelled `ios`, runs by hand | CI → Build and test for iOS | The Kotlin tests on an iOS simulator, the Xcode build, the UI tests, screenshots |
 | Pushes to `main`, once all of the above passed | CI → Version, build and GitHub Release | semantic-release decides the version from the commits; signed bundle; GitHub Release with the changelog; "What's new" from the last releases, translated by Claude into the app's languages |
-| After a release | CI → Upload to Google Play, Google Play listing graphics | The bundle goes to Play with "What's new" and the in-app update priority (major 5, feature 3, fix 1); the listing's icon, feature graphic and screenshots that changed are replaced |
+| After a release | CI → Upload to Google Play, Google Play listing graphics, Upload to TestFlight | The bundle goes to Play with "What's new" and the in-app update priority (major 5, feature 3, fix 1); the listing's icon, feature graphic and screenshots that changed are replaced; the iOS app goes to TestFlight, for its testers |
 | Every pull request, and its renames | Automation → Pull request title | The title is a Conventional Commit of 100 characters at most (it becomes the commit on `main`) |
 | Dependabot's and the bot's pull requests | Automation → automerge | GitHub merges them once CI is green; build-only updates merge as `build(deps)`, which releases nothing |
 | The `ios` label on a pull request | Automation → Build for iOS too | Starts CI on the pull request's branch, with its iOS build |
