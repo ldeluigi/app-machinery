@@ -1,10 +1,11 @@
 name: Automation
 
 # Everything that looks after an app besides its CI, in one workflow, each job for its own events:
-# - Pull requests: the title is a Conventional Commit of 100 characters at most (it becomes the squashed commit, which
-#   decides the release); Dependabot's pull requests (major updates labelled `major-update`, build-only ones squashed as
-#   `build(deps)`, which releases nothing) and the bot's, labelled `automerge`, merge by themselves once CI is green;
-#   the `ios` label starts the CI with its iOS build on the pull request's branch.
+# - Pull requests: the title is a Conventional Commit of 100 characters at most with the " (#123)" squash-merging adds
+#   (it becomes the squashed commit, which decides the release); Dependabot's pull requests (major updates labelled
+#   `major-update`, build-only ones squashed as `build(deps)`, which releases nothing) and the bot's, labelled
+#   `automerge`, merge by themselves once CI is green; the `ios` label starts the CI with its iOS build on the pull
+#   request's branch.
 # - A failed run of CI or of the app's own jobs: re-run once (network hiccups, lost runners); failed again, the CI-fix
 #   agent takes it. The triage job keeps count: each attempt on a pull request adds a label, autofix-1 to autofix-3, and a
 #   fourth failure gets `needs-human`, a comment and an issue for the owner. A fix lands on the pull request's branch,
@@ -68,12 +69,15 @@ jobs:
       - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      - name: At most 100 characters
+      # Squash-merged, the title becomes the commit's subject followed by " (#<number>)", and commitlint counts both.
+      - name: At most 100 characters, with what squash-merging adds
         env:
           TITLE: ${{ github.event.pull_request.title }}
+          NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ "${#TITLE}" -gt 100 ]; then
-            echo "::error::The title has ${#TITLE} characters: commitlint takes 100 at most."
+          subject="$TITLE (#$NUMBER)"
+          if [ "${#subject}" -gt 100 ]; then
+            echo "::error::Squash-merged, the title makes a subject of ${#subject} characters with \" (#$NUMBER)\", and commitlint takes 100 at most: shorten the title to $((100 - ${#subject} + ${#TITLE})) characters."
             exit 1
           fi
 
