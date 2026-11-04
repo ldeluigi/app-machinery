@@ -62,7 +62,9 @@ that token's pushes, so a merged update would never be released.
 - [ ] Create the repository `<owner>/app-machinery`, **public**, from this one (or transfer it there).
 - [ ] **Settings → Pages → Build and deployment → Source: Deploy from a branch → `gh-pages` / `(root)` → Save.**
       The Gradle plugins are published there (`https://<owner>.github.io/app-machinery/maven`).
-- [ ] Give the machinery its secrets once you have them (step 6): `.github/scripts/set-secrets.sh <owner>/app-machinery`.
+- [ ] Give the machinery its secrets once you have them (step 6). It needs only the bot's and the agents', not an
+      app's: `.github/scripts/set-secrets.sh <owner>/app-machinery GH_APP_CLIENT_ID GH_APP_LOGIN GH_APP_PRIVATE_KEY
+      CLAUDE_CODE_OAUTH_TOKEN COPILOT_GITHUB_TOKEN`.
 - [ ] Apply its settings once by hand: **Actions → Self automation → Run workflow → settings**. From then on it runs
       monthly, and whenever `settings/` changes, for
       every repository the bot is installed on.
