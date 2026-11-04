@@ -9,6 +9,7 @@ are the ones that land on you, with what to do.
 | Agents fail with "usage limit", issues get `retry next week` | The Claude (or Copilot) quota is used up | Nothing: they retry on Monday. To retry now, take the label off. |
 | "Bad credentials" or 401 in an agent or the bot's steps | A token expired or was revoked | docs/04-renewals.md. |
 | "Resource not accessible by integration" in the bot's steps | The bot lacks a permission (after a machinery change that needs a new one) | The App's settings → Permissions → add it; then accept it on the installation (**`<owner>` Settings → GitHub Apps → Configure → Review request**). |
+| A release went to neither Google Play nor TestFlight | `PLAY_TRACK` (or `APPLE_TEAM_ID`) isn't set on the app | The run's **Release targets** job says what was released and where it went. Set the variable (docs/02-new-app.md, steps 8 and 10a); the next release uploads, with the notes of this one too. |
 | Google Play upload fails with 403 | The service account lacks a permission on the app | Play Console → Users and permissions → `publisher@…` → App permissions (docs/02-new-app.md step 8). |
 | Google Play upload fails with "Package not found" | The app isn't on Play yet, or `APP_ID` is wrong | Do the first upload by hand (docs/02-new-app.md step 7); check the `APP_ID` variable. |
 | Store listing fails with 403 | No **Manage store presence** for the service account | As above. |

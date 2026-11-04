@@ -20,6 +20,8 @@ name: CI
 #   GitHub Release; the release tool turns the changelogs of this release and the ones before it into Google Play's
 #   notes, which Claude Code translates into the app's languages. Only the newest commit on the branch releases: an
 #   older run that sees newer commits leaves the release to theirs.
+# - Release targets: where the release goes (Google Play once `PLAY_TRACK` is set, TestFlight once `APPLE_TEAM_ID` is),
+#   read from the release job's note: its log says why an upload didn't run;
 # - Upload to Google Play, with the notes in the store listing's languages and the in-app update priority (once the
 #   `PLAY_TRACK` variable is set);
 # - Google Play listing graphics: the app's StoreArtTest draws them, and the ones that changed are replaced. A run
@@ -373,10 +375,6 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-    outputs:
-      published: ${{ steps.semantic.outputs.new_release_published }}
-      version: ${{ steps.semantic.outputs.new_release_version }}
-      priority: ${{ steps.play-notes.outputs.priority }}
     steps:
       - id: gate
         name: Release only if this is still the newest commit
@@ -498,13 +496,79 @@ jobs:
             ${{ inputs.android-app }}/build/outputs/mapping/release/mapping.txt
             whatsnew/
           retention-days: 30
+      # What the upload jobs read, as an artifact: this job's outputs reached them empty (the job runs in the release
+      # environment, with its secrets). Written by every successful run, with no version when nothing was released,
+      # so that re-running every job never uploads a release twice.
+      - name: Note what was released
+        env:
+          PUBLISHED: ${{ steps.semantic.outputs.new_release_published }}
+          VERSION: ${{ steps.semantic.outputs.new_release_version }}
+          PRIORITY: ${{ steps.play-notes.outputs.priority }}
+        run: |
+          mkdir -p release-info
+          if [ "$PUBLISHED" = true ]; then
+            printf 'version=%s\npriority=%s\n' "$VERSION" "$PRIORITY" > release-info/release.env
+          else
+            printf 'version=\npriority=\n' > release-info/release.env
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-info
+          path: release-info/
+          overwrite: true
+          retention-days: 30
+
+  # Where the release goes, decided on a runner from the release job's note and the app's variables, so that the
+  # upload jobs' conditions read only this job's outputs: a job without the release environment, as the machinery's
+  # own release job is, whose outputs arrive.
+  targets:
+    name: Release targets
+    needs: release
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.targets.outputs.version }}
+      priority: ${{ steps.targets.outputs.priority }}
+      play: ${{ steps.targets.outputs.play }}
+      testflight: ${{ steps.targets.outputs.testflight }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-info
+          path: release-info
+      - id: targets
+        name: Where the release goes
+        env:
+          PLAY_TRACK: ${{ vars.PLAY_TRACK }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          version="$(sed -n 's/^version=//p' release-info/release.env)"
+          priority="$(sed -n 's/^priority=//p' release-info/release.env)"
+          play=false
+          testflight=false
+          if [ -n "$version" ]; then
+            # PLAY_TRACK and APPLE_TEAM_ID switch the uploads on (docs/02-new-app.md)
+            [ -z "$PLAY_TRACK" ] || play=true
+            [ -z "$APPLE_TEAM_ID" ] || testflight=true
+            echo "Released $version: to Google Play $play, to TestFlight $testflight"
+          else
+            echo "Nothing was released."
+          fi
+          {
+            echo "version=$version"
+            echo "priority=$priority"
+            echo "play=$play"
+            echo "testflight=$testflight"
+          } >> "$GITHUB_OUTPUT"
 
   play:
     name: Upload to Google Play
-    needs: release
+    needs: targets
     # PLAY_TRACK switches the upload on: it stays unset until the app's first bundle is on Play (docs/02-new-app.md),
     # since uploads to an app Play doesn't know yet only fail.
-    if: needs.release.outputs.published == 'true' && vars.PLAY_TRACK != ''
+    if: needs.targets.outputs.play == 'true'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -572,7 +636,7 @@ jobs:
           whatsNewDirectory: release/whatsnew
           tracks: ${{ vars.PLAY_TRACK }}
           status: completed
-          inAppUpdatePriority: ${{ needs.release.outputs.priority }}
+          inAppUpdatePriority: ${{ needs.targets.outputs.priority }}
       - name: Upload (service account key)
         if: vars.GCP_WIF_PROVIDER == ''
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
@@ -584,7 +648,7 @@ jobs:
           whatsNewDirectory: release/whatsnew
           tracks: ${{ vars.PLAY_TRACK }}
           status: completed
-          inAppUpdatePriority: ${{ needs.release.outputs.priority }}
+          inAppUpdatePriority: ${{ needs.targets.outputs.priority }}
 
   listing:
     name: Google Play listing graphics
@@ -592,9 +656,10 @@ jobs:
     # hand on the default branch with `store-listing`.
     needs: play
     if: >-
-      !cancelled() && vars.PLAY_TRACK != '' &&
+      !cancelled() &&
       (needs.play.result == 'success' ||
-       (inputs.store-listing && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
+       (inputs.store-listing && vars.PLAY_TRACK != '' &&
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 30
@@ -635,10 +700,10 @@ jobs:
 
   testflight:
     name: Upload to TestFlight
-    needs: release
+    needs: targets
     # APPLE_TEAM_ID switches the upload on: it stays unset until the app's record exists in App Store Connect
     # (docs/02-new-app.md), since uploads for an app App Store Connect doesn't know only fail.
-    if: needs.release.outputs.published == 'true' && vars.APPLE_TEAM_ID != ''
+    if: needs.targets.outputs.testflight == 'true'
     runs-on: macos-latest
     environment: release
     # The release build of the Kotlin framework, then the archive
@@ -649,11 +714,11 @@ jobs:
       APP: ${{ inputs.ios-app }}
       # The team signs, and the version is the release's, in every Gradle run (Xcode's included)
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-      ORG_GRADLE_PROJECT_releaseVersion: ${{ needs.release.outputs.version }}
+      ORG_GRADLE_PROJECT_releaseVersion: ${{ needs.targets.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: v${{ needs.release.outputs.version }}
+          ref: v${{ needs.targets.outputs.version }}
           fetch-depth: 0
           persist-credentials: false
       - *find-machinery
