@@ -5,9 +5,9 @@ For changing the machinery, or understanding why it is built this way.
 ## Layout
 
 ```
-.github/workflows/        reusable workflows the apps call (ci, ios, release, store-listing, pull-request-title,
-                          automerge, retry, ci-fix-agent, issue-agent, upgrade-agent, refresh, health), and the
-                          machinery's own (self-*.yml)
+.github/workflows/        the two reusable workflows the apps call: ci.yml (checks, Android and iOS builds, release,
+                          Google Play) and automation.yml (auto-merge, retries, the AI agents, the monthly refresh,
+                          the health report); and the machinery's own, self-ci.yml and self-automation.yml
 .github/actions/          setup-build, claude, copilot, agent (Claude, then Copilot), publish-commits
 .github/scripts/          the scripts the workflows and you run: forbidden names, issue references, health report,
                           settings, secrets, take-agents-off, out-of-credit
@@ -46,12 +46,12 @@ brings them all, tested together. The app's own catalog lists only the libraries
 ## How the machinery maintains itself
 
 - **Dependabot** bumps the actions and the Gradle plugins and libraries of its catalog, weekly, as `fix` commits.
-- **Self refresh** bumps what Dependabot can't see, monthly.
+- **Self automation** bumps what Dependabot can't see, monthly, and applies `settings/` to every app.
 - **Self CI** checks every change: actionlint (with shellcheck), pinned actions, Conventional Commits, the plugins' and
-  tools' builds and tests.
-- **Self automation** merges Dependabot's and the bot's pull requests once green, re-runs failures, and gives the rest
+  tools' builds and tests, and the template's build with the change's plugins. Then it releases (below).
+- Its own automation merges Dependabot's and the bot's pull requests once green, re-runs failures, and gives the rest
   to the CI-fix agent, as for an app.
-- **Self release** tags each `feat` or `fix` and publishes the plugins of that version. Dependabot then offers it to
+- **Self CI**, on `main`, tags each `feat` or `fix` and publishes the plugins of that version. Dependabot then offers it to
   every app, whose own CI checks it before it merges.
 
 ## Choices

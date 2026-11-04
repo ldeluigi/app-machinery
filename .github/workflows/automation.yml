@@ -1,0 +1,1073 @@
+name: Automation
+
+# Everything that looks after an app besides its CI, in one workflow, each job for its own events:
+# - Pull requests: the title is a Conventional Commit of 100 characters at most (it becomes the squashed commit, which
+#   decides the release); Dependabot's pull requests (major updates labelled `major-update`, build-only ones squashed as
+#   `build(deps)`, which releases nothing) and the bot's, labelled `automerge`, merge by themselves once CI is green;
+#   the `ios` label starts the CI with its iOS build on the pull request's branch.
+# - A failed run of CI or of the app's own jobs: re-run once (network hiccups, lost runners); failed again, the CI-fix
+#   agent takes it. The triage job keeps count: each attempt on a pull request adds a label, autofix-1 to autofix-3, and a
+#   fourth failure gets `needs-human`, a comment and an issue for the owner. A fix lands on the pull request's branch,
+#   or, on the default branch, in a new pull request that merges by itself.
+# - Issues and comments: Claude takes every issue the owner (or a collaborator) opens without the `needs-human` or
+#   `copilot` label, any issue given the `claude` label, and `@claude ...` in a comment. It keeps a checklist in a comment,
+#   commits to an `agent/issue-...` branch, and the bot opens the pull request, which merges by itself once CI is green.
+#   The `copilot` label, `@copilot ...`, or Claude being unable (no credential, usage limit, error) hands the issue to the
+#   Copilot CLI, which works the same way. An issue the agents ran out of credit for gets `retry next week`.
+# - Monday (`weekly-schedule`): the `retry next week` label comes off, and the issue agent starts again.
+# - A major update merged: the upgrade agent adopts what the new version recommends, in a pull request.
+# - Monthly (`monthly-schedule`): the refresh bumps what Dependabot can't see and reports the app's health in a pull
+#   request; an agent reviews it, fixes what code can fix, checks the stores' policies, and opens one issue for what only
+#   the owner can do.
+# - A failure of any of these jobs is recorded in the pinned "Automation health" issue, with its cause: nothing tries to
+#   fix the automation's own failures, which could loop.
+#
+# Claude runs on the owner's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN) or an Anthropic API key (ANTHROPIC_API_KEY),
+# Copilot on COPILOT_GITHUB_TOKEN; the bot is the GitHub App of GH_APP_CLIENT_ID and GH_APP_PRIVATE_KEY.
+# The app's .github/workflows/automation.yml calls this one: see docs/02-new-app.md.
+
+on:
+  workflow_call:
+    inputs:
+      build-only-deps:
+        description: The list of build-only dependencies (regular expressions of group:artifact)
+        type: string
+        default: config/build-only-deps.txt
+      ios-label:
+        description: The label that asks for the iOS build on a pull request
+        type: string
+        default: ios
+      ci-workflow:
+        description: The app's CI workflow file, which the iOS label starts
+        type: string
+        default: ci.yml
+      weekly-schedule:
+        description: The app's cron for retrying the issues that waited for credit (as its caller writes it)
+        type: string
+        default: "30 8 * * 1"
+      monthly-schedule:
+        description: The app's cron for the monthly refresh (as its caller writes it)
+        type: string
+        default: "41 4 1 * *"
+      task:
+        description: 'What a run started by hand does: "refresh" or "retry-issues"'
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Pull request title
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: At most 100 characters
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [ "${#TITLE}" -gt 100 ]; then
+            echo "::error::The title has ${#TITLE} characters: commitlint takes 100 at most."
+            exit 1
+          fi
+
+  automerge-dependabot:
+    name: Dependabot
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.action != 'edited' && (github.event.pull_request.user.login == 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    # fetch-metadata lists the pull request's commits, which needs pull request access in a private repository
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: config
+          persist-credentials: false
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Label major updates
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh label create major-update --color B60205 --description "Major dependency update" --force
+          gh pr edit "$PR_URL" --add-label major-update
+      - name: Choose the squash commit subject
+        id: subject
+        env:
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          DEPENDENCIES: ${{ steps.meta.outputs.dependency-names }}
+          TITLE: ${{ github.event.pull_request.title }}
+          LIST: ${{ inputs.build-only-deps }}
+        run: |
+          subject="$TITLE"
+          if [ "$ECOSYSTEM" = "gradle" ] && [ -f "$LIST" ]; then
+            patterns="$(grep -vE '^\s*(#|$)' "$LIST")"
+            build_only=true
+            IFS=',' read -ra deps <<< "$DEPENDENCIES"
+            for dep in "${deps[@]}"; do
+              dep="$(echo "$dep" | xargs)"
+              if ! grep -qE -f <(echo "$patterns") <<< "$dep"; then build_only=false; fi
+            done
+            if [ "$build_only" = true ]; then subject="build(deps):${TITLE#*:}"; fi
+          fi
+          echo "subject=$subject" >> "$GITHUB_OUTPUT"
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          SUBJECT: ${{ steps.subject.outputs.subject }}
+        run: gh pr merge --auto --squash --subject "$SUBJECT" "$PR_URL"
+
+  automerge-bot:
+    name: Bot pull requests
+    if: >-
+      github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.action != 'edited' &&
+      (github.event.pull_request.user.login == vars.GH_APP_LOGIN &&
+       contains(github.event.pull_request.labels.*.name, 'automerge'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
+
+  rerun:
+    name: Re-run failed jobs once
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1 &&
+      (github.event.workflow_run.head_branch == github.event.repository.default_branch ||
+       startsWith(github.event.workflow_run.head_branch, 'dependabot/') ||
+       startsWith(github.event.workflow_run.head_branch, 'machinery/') ||
+       startsWith(github.event.workflow_run.head_branch, 'agent/') ||
+       startsWith(github.event.workflow_run.head_branch, 'bot/'))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Re-run the failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
+
+  retry-issues:
+    name: Retry the issues
+    if: >-
+      github.event.schedule == inputs.weekly-schedule ||
+      (github.event_name == 'workflow_dispatch' && inputs.task == 'retry-issues')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: write
+      - name: Take the "retry next week" label off
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          issues="$(gh issue list --label "retry next week" --state open --limit 100 --json number --jq '.[].number')"
+          for issue in $issues; do
+            gh issue edit "$issue" --remove-label "retry next week"
+            echo "Retrying #$issue"
+          done
+
+  fix-triage:
+    name: Triage
+    if: >-
+      github.event_name == 'workflow_run' &&
+      (github.event.workflow_run.conclusion == 'failure' &&
+       github.event.workflow_run.run_attempt > 1 &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.head_branch == github.event.repository.default_branch ||
+        startsWith(github.event.workflow_run.head_branch, 'dependabot/') ||
+        startsWith(github.event.workflow_run.head_branch, 'machinery/') ||
+        startsWith(github.event.workflow_run.head_branch, 'agent/') ||
+        startsWith(github.event.workflow_run.head_branch, 'bot/')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      go: ${{ steps.count.outputs.go }}
+      pull-request: ${{ steps.count.outputs.pull-request }}
+      engine: ${{ steps.count.outputs.engine }}
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: write
+          permission-pull-requests: write
+      - id: count
+        name: Count the attempts
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: |
+          number="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          echo "pull-request=$number" >> "$GITHUB_OUTPUT"
+          echo "engine=claude" >> "$GITHUB_OUTPUT"
+          if [ -z "$number" ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          labels="$(gh pr view "$number" --json labels --jq '[.labels[].name] | join(",")')"
+          # A "copilot" label on the pull request asks for Copilot
+          case ",$labels," in *,copilot,*) echo "engine=copilot" >> "$GITHUB_OUTPUT" ;; esac
+          case ",$labels," in *,needs-human,*) echo "#$number already waits for the owner."; exit 0 ;; esac
+          attempts=0
+          for n in 1 2 3; do
+            case ",$labels," in *,autofix-$n,*) attempts=$n ;; esac
+          done
+          if [ "$attempts" -ge 3 ]; then
+            gh label create needs-human --color D93F0B --description "Automation could not handle this" --force
+            gh pr edit "$number" --add-label needs-human
+            gh pr comment "$number" --body "$WORKFLOW failed again after three fixes ([this run]($RUN_URL)): the owner takes it from here."
+            gh issue create --title "Automation needs a human: $WORKFLOW keeps failing on #$number" \
+              --body "The agents tried three fixes on #$number and [$WORKFLOW still fails]($RUN_URL). If an agent opened #$number, it can be closed."
+            exit 0
+          fi
+          next=$((attempts + 1))
+          gh label create "autofix-$next" --color FBCA04 --description "CI-fix agent attempt $next" --force
+          gh pr edit "$number" --add-label "autofix-$next"
+          echo "go=true" >> "$GITHUB_OUTPUT"
+
+  fix:
+    name: Fix
+    needs: fix-triage
+    if: needs.fix-triage.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: ci-fix-${{ github.event.workflow_run.head_branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          persist-credentials: false
+      - id: machinery
+        name: Find the machinery
+        env:
+          WORKFLOW: ${{ job.workflow_ref }}
+        run: echo "repository=${WORKFLOW%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+      - name: Check out the machinery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.machinery.outputs.repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .machinery
+          persist-credentials: false
+      # The bot App can't read Actions logs, so they are saved for the agent with the workflow token
+      - name: Save the failed run's logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          mkdir -p build
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" > build/failed-run.log
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed >> build/failed-run.log || true
+      - id: agent
+        uses: ./.machinery/.github/actions/agent
+        with:
+          engine: ${{ needs.fix-triage.outputs.engine }}
+          web: "true"
+          allowed-commands: gh pr list,gh pr view,gh release view
+          allowed-bots: ${{ vars.GH_APP_LOGIN }}
+          branch: ${{ needs.fix-triage.outputs.pull-request && github.event.workflow_run.head_branch || format('agent/fix-{0}', github.event.workflow_run.id) }}
+          open-pull-request: ${{ needs.fix-triage.outputs.pull-request == '' }}
+          body: Fixes the failure of [${{ github.event.workflow_run.name }}](${{ github.event.workflow_run.html_url }}), from the CI-fix agent.
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          app-client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          prompt: |
+            You are the app's CI-fix agent. A run of the "${{ github.event.workflow_run.name }}" workflow failed twice
+            (its automatic retry failed too): ${{ github.event.workflow_run.html_url }}, on branch
+            `${{ github.event.workflow_run.head_branch }}`, where you are checked out. Its summary and failed logs are
+            in `build/failed-run.log`. Read AGENTS.md first: it holds the rules for AI agents.
+
+            1. Find the root cause in the logs.
+            2. Decide whether code can fix it.
+               - A code, build or dependency problem (a compile error after a dependency update, a removed API, a
+                 failing test, a lint rule): fix it. When a dependency update broke the build, read that dependency's
+                 release notes or migration guide and migrate the code accordingly.
+               - Not fixable by code (expired or missing credentials, a store's API errors, an outage, a quota): change
+                 nothing.
+            3. Make the smallest change that fixes the root cause, and run the app's checks (`./gradlew check`) until
+               they pass. Wait for every command to finish: whatever isn't committed when you stop is lost.
+            4. Commit with a Conventional Commit message, e.g. `fix(deps): migrate to the new Room API`, never with an
+               issue number in it. Push nothing: the workflow publishes your commits.
+            5. End with a short answer: what you changed, or what happened and what the owner must do.
+      - id: token
+        if: ${{ !cancelled() && steps.agent.outputs.pushed != 'true' }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: write
+      # No fix: code can't make one, as the agent's answer says, or no agent could run
+      - name: Tell the owner
+        if: steps.token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          ANSWER: "${{ steps.agent.outputs.response || format('No agent could look at it: {0}', steps.agent.outputs.error || 'neither Claude nor Copilot is set up.') }}"
+        run: |
+          gh issue create --title "Automation needs a human: $WORKFLOW failed" \
+            --body "$(printf '[%s failed twice](%s), and no fix came of it.\n\n%s' "$WORKFLOW" "$RUN_URL" "$ANSWER")"
+
+  issue-claude:
+    name: Claude
+    # People with write access only, never bots: the agents' own issues are the ones that need a human. The bot App
+    # only hands back an issue the agents had already taken, with the "claude" label (the retry job below).
+    # An issue opened with the "claude" label is left to its "labeled" event, so it isn't taken twice.
+    if: >-
+      (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review') &&
+      ((github.event.action == 'labeled' && github.event.label.name == 'claude' &&
+        (github.event.sender.type == 'User' || github.event.sender.login == vars.GH_APP_LOGIN)) ||
+       (github.event.sender.type == 'User' && (
+         (contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+                   github.event.comment.author_association || github.event.review.author_association ||
+                   github.event.issue.author_association) &&
+          ((github.event.action == 'opened' &&
+            !contains(github.event.issue.labels.*.name, 'needs-human') &&
+            !contains(github.event.issue.labels.*.name, 'copilot') &&
+            !contains(github.event.issue.labels.*.name, 'claude')) ||
+           contains(github.event.comment.body || github.event.review.body, '@claude'))))))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    # Per job, not per workflow: comments that don't call Claude must not cancel a queued request
+    concurrency:
+      group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+    steps:
+      # The bot App's token, not the read-only workflow token: on issues the Claude action fetches the base branch with
+      # the checkout's credentials, and git still sends them when Claude pushes, since actions/checkout keeps them in a
+      # file of its own that the Claude action doesn't replace (GitHub refused Claude's push with the workflow token)
+      - id: git-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.git-token.outputs.token }}
+      - id: machinery
+        name: Find the machinery
+        env:
+          WORKFLOW: ${{ job.workflow_ref }}
+        run: echo "repository=${WORKFLOW%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+      - name: Check out the machinery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.machinery.outputs.repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .machinery
+          persist-credentials: false
+      - name: Keep the machinery out of the app's commits
+        run: echo ".machinery/" >> .git/info/exclude
+      # A failure is dealt with below: the issue goes to Copilot, or waits for next week, and the run fails only on
+      # errors other than a used-up quota
+      - id: claude
+        continue-on-error: true
+        uses: ./.machinery/.github/actions/claude
+        with:
+          # The bot App's "claude" label retries an issue
+          allowed-bots: ${{ vars.GH_APP_LOGIN }}
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          app-client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          branch-prefix: agent/
+          track-progress: "true"
+          prompt: |
+            Read AGENTS.md before changing anything: it holds the rules for AI agents. README.md describes the app.
+
+            - If the task needs a human (what AGENTS.md reserves for the owner, credentials, the stores' consoles, or
+              a choice only the owner can make), change nothing: say in your comment what the owner must do, and
+              stop. On an issue, the workflow then labels it `needs-human`.
+            - Keep the change to what was asked.
+            - Run `./gradlew check` and make it pass before every push. Wait for every command to finish: this run
+              ends when you stop, and whatever isn't pushed by then is lost.
+            - Commit every change yourself, as Conventional Commits. On an issue, the first commit's subject becomes
+              the pull request's title, which decides the release: make it name the whole change, e.g.
+              `feat(game): replay the song from the beginning`.
+            - Never put an issue number in a commit message (`Closes #12`, `Fixes #12` or a bare `#12`): commit
+              messages become the release notes and the stores' "What's new". The pull request closes the issue.
+            - On an issue, finish with the whole change committed and leave out the "Create a PR" link: the workflow
+              then opens the pull request, which closes the issue when merged.
+      # Claude couldn't take the issue. The copilot label, added as the bot App so that it starts the Copilot job, hands
+      # it over; without Copilot, an issue Claude had no quota left for waits for next week
+      - id: handover
+        if: steps.claude.outputs.done != 'true' && github.event_name == 'issues'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: write
+      - name: Hand the issue over
+        if: steps.handover.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.handover.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          COPILOT_READY: ${{ secrets.COPILOT_GITHUB_TOKEN != '' }}
+          OUT_OF_CREDIT: ${{ steps.claude.outputs.out-of-credit }}
+        run: |
+          if [ "$COPILOT_READY" = "true" ]; then
+            gh issue edit "$ISSUE" --add-label copilot
+          elif [ "$OUT_OF_CREDIT" = "true" ]; then
+            .machinery/.github/scripts/take-agents-off.sh "$ISSUE" --retry-next-week
+          fi
+      - name: Open the pull request
+        if: >-
+          steps.claude.outputs.done == 'true' && steps.claude.outputs.branch-name != '' &&
+          github.event.issue && !github.event.issue.pull_request
+        env:
+          GH_TOKEN: ${{ steps.claude.outputs.app-token }}
+          GH_REPO: ${{ github.repository }}
+          BASE: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ steps.claude.outputs.branch-name }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # The oldest commit names the change; nothing comes back when Claude pushed nothing. Asked about a branch that
+          # isn't on GitHub, gh prints GitHub's "Not Found" reply instead, which would become the title
+          title=""
+          if gh api "repos/$GITHUB_REPOSITORY/branches/$BRANCH" --silent 2>/dev/null; then
+            title="$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$BRANCH" --jq '.commits[0].commit.message // ""' | head -n1)"
+          fi
+          if [ -z "$title" ]; then
+            # Commits Claude made that aren't on GitHub: the push was refused, and they are lost with this runner
+            if [ "$(git rev-list --count "origin/$BASE..$BRANCH" 2>/dev/null || echo 0)" -gt 0 ]; then
+              echo "::error title=Claude's branch was never pushed::GitHub refused the push of $BRANCH, so Claude's commits are lost with this runner. Claude's comment on #$ISSUE should give git's error."
+              exit 1
+            fi
+            # Given an issue (not asked something in a comment), Claude commits nothing only when the issue needs the
+            # owner, as its comment says: the label shows it, and keeps the agents off it
+            if [ "$GITHUB_EVENT_NAME" = "issues" ]; then
+              gh label create needs-human --color D93F0B --description "Automation could not handle this" --force
+              gh issue edit "$ISSUE" --add-label needs-human
+              echo "::notice::Claude committed nothing: #$ISSUE needs a human, as Claude's comment says."
+            else
+              echo "Claude pushed no commits."
+            fi
+            exit 0
+          fi
+          gh label create agent --color 1D76DB --description "Opened by an AI agent" --force
+          gh label create automerge --color 0E8A16 --description "Merge automatically once CI is green" --force
+          gh pr create --base "$BASE" --head "$BRANCH" --title "$title" --label agent --label automerge \
+            --body "Closes #$ISSUE. Claude's work on the issue, from [this run]($RUN_URL); it merges by itself once CI is green. Comment \`@claude ...\` to ask for changes."
+      # Waiting for the quota is handled above; any other error of Claude's is the automation's, for Automation health
+      - name: Report Claude's failure
+        if: steps.claude.outcome == 'failure' && steps.claude.outputs.out-of-credit != 'true'
+        env:
+          WHY: ${{ steps.claude.outputs.error }}
+        run: |
+          echo "Claude couldn't finish: ${WHY:-see the Claude step}"
+          exit 1
+
+  issue-copilot:
+    name: Copilot
+    # The "copilot" label, added by a person or by the Claude job above as the bot App, or "@copilot ..." from someone
+    # with write access, never from a bot
+    if: >-
+      (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review') &&
+      ((github.event.action == 'labeled' && github.event.label.name == 'copilot' &&
+        (github.event.sender.type == 'User' || github.event.sender.login == vars.GH_APP_LOGIN)) ||
+       (github.event.sender.type == 'User' &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+                 github.event.comment.author_association || github.event.review.author_association) &&
+        contains(github.event.comment.body || github.event.review.body, '@copilot')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Copilot reads the issue or pull request with the workflow token
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    concurrency:
+      group: copilot-${{ github.event.issue.number || github.event.pull_request.number }}
+    steps:
+      # Asked on a pull request, Copilot works on its branch; given an issue, on a new one, named as Claude's
+      - name: Choose the branch
+        id: branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.pull_request && github.event.issue.number || '' }}
+          ISSUE: ${{ github.event.issue.number }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ -z "$PR" ]; then
+            { echo "name=agent/issue-$ISSUE-$(date -u +%Y%m%d-%H%M)"; echo "ref=$BASE"; echo "new=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # "|| true": a pull request gh can't show is reported below, not by the step ending here
+          read -r head fork <<< "$(gh pr view "$PR" --json headRefName,isCrossRepository --jq '"\(.headRefName) \(.isCrossRepository)"' || true)"
+          if [ -z "$head" ]; then
+            echo "::error::Pull request #$PR wasn't found."
+            exit 1
+          elif [ "$fork" = "true" ]; then
+            echo "::error::#$PR comes from a fork: Copilot only pushes to this repository's branches."
+            exit 1
+          fi
+          { echo "name=$head"; echo "ref=$head"; } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.branch.outputs.ref }}
+          persist-credentials: false
+      - id: machinery
+        name: Find the machinery
+        env:
+          WORKFLOW: ${{ job.workflow_ref }}
+        run: echo "repository=${WORKFLOW%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+      - name: Check out the machinery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.machinery.outputs.repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .machinery
+          persist-credentials: false
+      - name: Keep the machinery out of the app's commits
+        run: echo ".machinery/" >> .git/info/exclude
+      - name: Start the branch
+        id: start
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          NEW: ${{ steps.branch.outputs.new }}
+        run: |
+          git config user.name "Copilot"
+          git config user.email "198982749+Copilot@users.noreply.github.com"
+          if [ "$NEW" = "true" ]; then
+            git switch -c "$BRANCH"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Write the task
+        id: task
+        env:
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          NEW: ${{ steps.branch.outputs.new }}
+          ASKED: ${{ github.event.comment.body || github.event.review.body }}
+        run: |
+          if [ "$NEW" = "true" ]; then
+            task="Your task is issue #$NUMBER: \`gh issue view $NUMBER --comments\` shows it and its discussion."
+          else
+            task="You are on the branch of pull request #$NUMBER: \`gh pr view $NUMBER --comments\` shows it and its discussion, \`gh pr diff $NUMBER\` its changes."
+          fi
+          if [ -n "$ASKED" ]; then
+            task="$(printf '%s\n\nThe owner asked you in a comment there:\n\n%s' "$task" "$ASKED")"
+          fi
+          delimiter="EOF-$(openssl rand -hex 8)"
+          printf 'text<<%s\n%s\n%s\n' "$delimiter" "$task" "$delimiter" >> "$GITHUB_OUTPUT"
+      # A failure is dealt with below, as Claude's
+      - id: copilot
+        continue-on-error: true
+        uses: ./.machinery/.github/actions/copilot
+        with:
+          copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          prompt: |
+            Read AGENTS.md before changing anything: it holds the rules for AI agents. README.md describes the app.
+
+            ${{ steps.task.outputs.text }}
+
+            - If the task needs a human (what AGENTS.md reserves for the owner, credentials, the stores' consoles, or
+              a choice only the owner can make), change nothing: say what the owner must do, and stop. On an issue,
+              the workflow then labels it `needs-human`.
+            - Keep the change to what was asked.
+            - Run `./gradlew check` and make it pass before you finish.
+            - Commit every change yourself, as Conventional Commits, and push nothing: the workflow pushes your
+              commits and, for an issue, opens the pull request. Its title is your first commit's subject, which
+              decides the release: make it name the whole change, e.g. `feat(game): replay the song from the
+              beginning`.
+            - Never put an issue number in a commit message (`Closes #12`, `Fixes #12` or a bare `#12`): commit
+              messages become the release notes and the stores' "What's new". The pull request closes the issue.
+            - End with a short summary of what you changed, or of what the owner must do: the workflow posts it as
+              a comment.
+      - id: token
+        if: ${{ !cancelled() }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Push Copilot's commits
+        id: push
+        if: steps.copilot.outputs.done == 'true'
+        uses: ./.machinery/.github/actions/publish-commits
+        with:
+          token: ${{ steps.token.outputs.token }}
+          branch: ${{ steps.branch.outputs.name }}
+          start: ${{ steps.start.outputs.sha }}
+          open-pull-request: ${{ steps.branch.outputs.new }}
+          body: >-
+            Closes #${{ github.event.issue.number }}. Copilot's work on the issue, from
+            [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}); it merges
+            by itself once CI is green. Comment `@copilot ...` to ask for changes.
+      # Given an issue, Copilot commits nothing only when the issue needs the owner, as its answer says: the label shows
+      # it, and keeps the agents off it
+      - name: Mark the issue for the owner
+        if: >-
+          steps.copilot.outputs.done == 'true' && steps.push.outputs.pushed != 'true' &&
+          steps.branch.outputs.new == 'true' && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh label create needs-human --color D93F0B --description "Automation could not handle this" --force
+          gh issue edit "$ISSUE" --add-label needs-human
+          echo "::notice::Copilot committed nothing: #$ISSUE needs a human, as Copilot's answer says."
+      # Copilot's answer, or why it couldn't finish. Out of credit on an issue, nothing: the issue waits for next week
+      - name: Answer
+        if: >-
+          !cancelled() && steps.token.outcome == 'success' &&
+          (steps.copilot.outputs.done == 'true' || steps.copilot.outputs.error != '') &&
+          !(github.event_name == 'issues' && steps.copilot.outputs.out-of-credit == 'true')
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          DONE: ${{ steps.copilot.outputs.done }}
+          RESPONSE: ${{ steps.copilot.outputs.response }}
+          WHY: ${{ steps.copilot.outputs.error }}
+          PULL_REQUEST: ${{ steps.push.outputs.pull-request }}
+          PUSHED: ${{ steps.push.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$DONE" = "true" ]; then
+            body="$(printf '%s\n\n— Copilot, in [this run](%s)%s' "$RESPONSE" "$RUN_URL" "${PULL_REQUEST:+: $PULL_REQUEST}")"
+            if [ "$PUSHED" = "failure" ]; then
+              body="$(printf '%s\n\nIts commits could not be pushed: see the run.' "$body")"
+            fi
+          else
+            # "encountered an error", as Claude's: take-agents-off.sh deletes these comments when the issue waits
+            body="$(printf 'Copilot encountered an error in [this run](%s): %s' "$RUN_URL" "$WHY")"
+          fi
+          gh issue comment "$NUMBER" --body "$body"
+      # Given an issue it couldn't finish (no token, no credit, error), the label comes off, with Copilot, so that adding
+      # it again tries again; out of credit, the issue waits for next week
+      - name: Take Copilot off
+        if: >-
+          !cancelled() && github.event_name == 'issues' && steps.token.outcome == 'success' &&
+          steps.copilot.outputs.done != 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          OUT_OF_CREDIT: ${{ steps.copilot.outputs.out-of-credit }}
+        run: |
+          if [ "$OUT_OF_CREDIT" = "true" ]; then
+            .machinery/.github/scripts/take-agents-off.sh "$ISSUE" --retry-next-week
+            echo "::notice::Copilot ran out of credit: #$ISSUE waits for next week's reset."
+          else
+            .machinery/.github/scripts/take-agents-off.sh "$ISSUE"
+          fi
+      # Waiting for the quota is handled above; any other error of Copilot's is the automation's, for Automation health
+      - name: Report Copilot's failure
+        if: steps.copilot.outcome == 'failure' && steps.copilot.outputs.out-of-credit != 'true'
+        env:
+          WHY: ${{ steps.copilot.outputs.error }}
+        run: |
+          echo "Copilot couldn't finish: ${WHY:-see the Copilot step}"
+          exit 1
+
+  issue-retry:
+    name: Retry
+    # The "retry next week" label came off, by hand or on Monday (retry-issues): unless the issue needs a human, the
+    # "claude" label, given again as the bot App, starts the Claude job and, if Claude can't, Copilot
+    if: >-
+      github.event_name == 'issues' &&
+      (github.event.action == 'unlabeled' && github.event.label.name == 'retry next week' &&
+       (github.event.sender.type == 'User' || github.event.sender.login == vars.GH_APP_LOGIN) &&
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association) &&
+       !contains(github.event.issue.labels.*.name, 'needs-human'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: write
+      - name: Give the issue to Claude again
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh api -X DELETE "repos/$GH_REPO/issues/$ISSUE/labels/claude" --silent 2>/dev/null || true
+          gh label create claude --color C15F3C --description "Claude agent responsibility" --force
+          gh issue edit "$ISSUE" --add-label claude
+
+  upgrade:
+    name: Adopt the new versions
+    if: >-
+      github.event_name == 'pull_request' &&
+      (github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'major-update'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - id: machinery
+        name: Find the machinery
+        env:
+          WORKFLOW: ${{ job.workflow_ref }}
+        run: echo "repository=${WORKFLOW%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+      - name: Check out the machinery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.machinery.outputs.repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .machinery
+          persist-credentials: false
+      - id: agent
+        uses: ./.machinery/.github/actions/agent
+        with:
+          engine: ${{ contains(github.event.pull_request.labels.*.name, 'copilot') && 'copilot' || 'claude' }}
+          web: "true"
+          allowed-commands: gh pr view,gh release view
+          allowed-bots: ${{ vars.GH_APP_LOGIN }}
+          branch: agent/upgrade-${{ github.event.pull_request.number }}
+          open-pull-request: "true"
+          body: >-
+            Adopts what the major update merged in #${{ github.event.pull_request.number }} recommends; it merges by
+            itself once CI is green.
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          app-client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          prompt: |
+            You are the app's upgrade agent. The major dependency update "${{ github.event.pull_request.title }}"
+            (pull request #${{ github.event.pull_request.number }}, `gh pr view ${{ github.event.pull_request.number }}`)
+            was merged, and the build passes. Read AGENTS.md first: it holds the rules for AI agents.
+
+            1. From the pull request's description, find each updated dependency with its old and new version.
+            2. Read the release notes, changelog or migration guide between those versions.
+            3. Replace the APIs the new version deprecates, and take up recommended new APIs or configuration where
+               they fit naturally. Don't change what the app does, and don't refactor unrelated code.
+            4. Run the app's checks (`./gradlew check`) until they pass. Wait for every command to finish: whatever
+               isn't committed when you stop is lost.
+            5. Commit your changes; the first commit's subject becomes the pull request's title, e.g.
+               `refactor(deps): adopt the new Compose animation APIs`. Never put an issue number in a commit message.
+               Push nothing: the workflow opens the pull request.
+            6. End with a short answer: each change with a link to the changelog entry behind it, or why nothing was
+               worth changing.
+      - id: token
+        if: ${{ !cancelled() }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Answer on the merged pull request
+        if: steps.token.outcome == 'success' && (steps.agent.outputs.done == 'true' || steps.agent.outputs.error != '')
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          ANSWER: "${{ steps.agent.outputs.response || format('The upgrade agent could not run: {0}', steps.agent.outputs.error) }}"
+          OPENED: ${{ steps.agent.outputs.pull-request }}
+        run: |
+          body="$ANSWER"
+          [ -z "$OPENED" ] || body="$(printf '%s\n\n%s' "$ANSWER" "$OPENED")"
+          gh pr comment "$NUMBER" --body "$body"
+
+  refresh:
+    name: Refresh and check health
+    if: (github.event.schedule == inputs.monthly-schedule || (github.event_name == 'workflow_dispatch' && inputs.task == 'refresh'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    outputs:
+      branch: ${{ steps.open.outputs.branch }}
+      number: ${{ steps.open.outputs.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - &find-machinery
+        id: machinery
+        name: Find the machinery
+        env:
+          WORKFLOW: ${{ job.workflow_ref }}
+        run: echo "repository=${WORKFLOW%%/.github/workflows/*}" >> "$GITHUB_OUTPUT"
+      - &checkout-machinery
+        name: Check out the machinery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.machinery.outputs.repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .machinery
+          persist-credentials: false
+      - uses: ./.machinery/.github/actions/setup-build
+      - id: bump
+        name: Bump versions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          echo ".machinery/" >> .git/info/exclude
+          ./.machinery/gradlew -p .machinery :tools:bump:installDist --quiet
+          .machinery/tools/bump/build/install/bump/bin/bump
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Health checks
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: .machinery/.github/scripts/health-report.sh build/machinery-report.md
+      # Not create-pull-request: with nothing to bump, the pull request still comes, as an empty commit, since the agent
+      # checks the report and the stores' policy updates every month
+      - id: open
+        name: Open the pull request
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          SLUG: ${{ steps.token.outputs.app-slug }}
+        run: |
+          branch="machinery/$(date -u +%Y-%m)"
+          title="build(machinery): monthly refresh"
+          id="$(gh api "/users/$SLUG%5Bbot%5D" --jq .id)"
+          git config user.name "$SLUG[bot]"
+          git config user.email "$id+$SLUG[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          # build/ (the report) is git-ignored: naming it, even to exclude it, makes git add fail
+          git add -A
+          git commit --allow-empty -m "$title"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+          gh label create machinery-review --color 5319E7 --description "Monthly refresh: the agent reviews it" --force
+          gh pr create --head "$branch" --title "$title" --body-file build/machinery-report.md --label machinery-review \
+            || gh pr edit "$branch" --body-file build/machinery-report.md --add-label machinery-review
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "number=$(gh pr view "$branch" --json number --jq .number)" >> "$GITHUB_OUTPUT"
+
+  refresh-review:
+    name: Review
+    needs: refresh
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.refresh.outputs.branch }}
+          persist-credentials: false
+      - *find-machinery
+      - *checkout-machinery
+      - id: agent
+        uses: ./.machinery/.github/actions/agent
+        with:
+          web: "true"
+          allowed-commands: gh pr view,gh issue list,gh release view
+          allowed-bots: ${{ vars.GH_APP_LOGIN }}
+          branch: ${{ needs.refresh.outputs.branch }}
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          app-client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          prompt: |
+            You review the app's monthly refresh, pull request #${{ needs.refresh.outputs.number }}
+            (`gh pr view ${{ needs.refresh.outputs.number }}`): its description is a health report of versions bumped,
+            deprecation warnings, expiring credentials and stuck items. You are checked out on its branch. Read
+            AGENTS.md first: it holds the rules for AI agents.
+
+            1. Fix every code or build item of the report on this branch: Gradle and Android Gradle plugin deprecation
+               warnings (`./gradlew help --warning-mode=all`), the behaviour changes a new Android target SDK requires
+               (read the Android behaviour-changes page of that version), new lint, detekt or ktlint findings.
+            2. Keep the app within the stores' policies. Read Google Play's policy announcements of the last three
+               months (https://support.google.com/googleplay/android-developer/announcements/13412212) and its policy
+               deadlines of the next six (https://support.google.com/googleplay/android-developer/table/12921780), and
+               the App Store Review Guidelines' latest changes (https://developer.apple.com/app-store/review/guidelines/).
+               For each, decide whether it applies to the app, from its permissions and features (its manifests and
+               Info.plist), its target SDK and what it does with data (its privacy policy), and fix on this branch what
+               code can fix.
+            3. Run the app's checks (`./gradlew check`) until they pass, and commit with Conventional Commit messages,
+               never with an issue number in them. Push nothing: the workflow publishes your commits.
+            4. End with a short answer, in Markdown: what you fixed; each policy announcement and deadline you checked
+               and what you did about it; and, as a list headed `Owner:`, each thing only the owner can do (a store
+               console declaration, the Data safety form, a store listing, a credential), with its deadline and steps.
+      - id: token
+        if: ${{ !cancelled() }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+          permission-issues: write
+      - name: Post the review and let it merge
+        if: steps.token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ needs.refresh.outputs.number }}
+          DONE: ${{ steps.agent.outputs.done }}
+          ANSWER: "${{ steps.agent.outputs.response || format('No agent could review the refresh: {0}', steps.agent.outputs.error || 'neither Claude nor Copilot is set up.') }}"
+        run: |
+          gh pr comment "$NUMBER" --body "$ANSWER"
+          # What only the owner can do becomes one issue a month, unless one with that title is still open
+          owner="$(printf '%s\n' "$ANSWER" | sed -n '/^\**Owner:\**/,$p' | tail -n +2)"
+          title="Owner: the monthly refresh's to-dos ($(date -u +%Y-%m))"
+          if [ -n "$(printf '%s' "$owner" | tr -d '[:space:]')" ] && \
+             [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')" ]; then
+            gh issue create --title "$title" --body "$(printf 'From the review of #%s:\n\n%s' "$NUMBER" "$owner")"
+          fi
+          if [ "$DONE" = "true" ]; then
+            gh label create automerge --color 0E8A16 --description "Merge automatically once CI is green" --force
+            gh pr edit "$NUMBER" --add-label automerge
+          else
+            gh label create needs-human --color D93F0B --description "Automation could not handle this" --force
+            gh pr edit "$NUMBER" --add-label needs-human
+          fi
+
+
+  ios-label:
+    name: Build for iOS too
+    # The label starts the CI on the pull request's branch: its run reads the labels when it starts, so it builds for
+    # iOS, and its checks join the pull request's.
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == inputs.ios-label && !github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Start the CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW: ${{ inputs.ci-workflow }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: gh workflow run "$WORKFLOW" --ref "$BRANCH"
+
+  health:
+    name: Automation health
+    needs:
+      - automerge-dependabot
+      - automerge-bot
+      - ios-label
+      - rerun
+      - retry-issues
+      - fix-triage
+      - fix
+      - issue-claude
+      - issue-copilot
+      - issue-retry
+      - upgrade
+      - refresh
+      - refresh-review
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+      # This run's jobs, and their annotations
+      actions: read
+      checks: read
+    steps:
+      - name: Update the Automation health issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ github.workflow }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          title="Automation health"
+          number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number')"
+          failed="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" --paginate \
+            --jq '.jobs[] | select(.conclusion == "failure") | .name' | paste -sd ',' - | sed 's/,/, /g')"
+          # The runner's own "exit code" lines and the actions' generic "failed" lines say nothing about the cause
+          why="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" --paginate \
+              --jq '.jobs[] | select(.conclusion == "failure") | .id' |
+            while read -r job; do
+              gh api "repos/$GITHUB_REPOSITORY/check-runs/$job/annotations" \
+                --jq '.[] | select(.annotation_level == "failure") | .message | gsub("[[:space:]]+"; " ")'
+            done |
+            grep -vE 'exit code|exited with code|is_error:true|could not complete the task|result file not found' |
+            awk '!seen[$0]++' | head -n 3 | cut -c1-400 | awk 'NR > 1 { printf "; " } { printf "%s", $0 }' || true)"
+          line="- $(date -u +%Y-%m-%d) **$NAME** ($failed) failed: $URL${why:+. $why}"
+          if [ -z "$number" ]; then
+            gh label create needs-human --color D93F0B --description "Automation could not handle this" --force --repo "$GITHUB_REPOSITORY"
+            number="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label needs-human \
+              --body "Failures of the automation itself are listed here (agents never retry their own failures)." \
+              | grep -o '[0-9]*$')"
+            gh issue pin "$number" --repo "$GITHUB_REPOSITORY" || true
+          fi
+          gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$line"

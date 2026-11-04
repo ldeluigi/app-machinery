@@ -2,7 +2,7 @@
 # Takes the AI agents off issue $1 after they failed on it: removes the "copilot" label, so that the label can hand the
 # issue to Copilot again later.
 # With --retry-next-week (the agents ran out of credit) it also deletes their error comments and adds the
-# "retry next week" label: agent-retry.yml takes it off on Monday, after the quotas reset, and the issue agent starts
+# "retry next week" label: the automation workflow takes it off on Monday, after the quotas reset, and the issue agent starts
 # again.
 # Needs GH_TOKEN (issues: write) and GH_REPO.
 set -euo pipefail

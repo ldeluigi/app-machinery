@@ -22,7 +22,7 @@ data class Latest(
 /**
  * Applies [latest] to the version files under [root] that it has: `.java-version` (the machinery's and every app's),
  * the Android SDK levels in `gradle/libs.versions.toml`, and the Copilot CLI and Claude Code versions pinned in the
- * machinery's own action and workflow. Versions only ever move forward.
+ * machinery's own action and CI workflow. Versions only ever move forward.
  */
 class Machinery(
     private val root: File,
@@ -34,7 +34,7 @@ class Machinery(
             bumpCatalog("android-compileSdk", "compileSdk", latest.androidApi),
             bumpCatalog("android-targetSdk", "targetSdk", latest.androidApi),
             bumpPinned(COPILOT_ACTION, "Copilot CLI", COPILOT_PIN, latest.copilotCli),
-            bumpPinned(RELEASE_WORKFLOW, "Claude Code", CLAUDE_PIN, latest.claudeCode),
+            bumpPinned(CI_WORKFLOW, "Claude Code", CLAUDE_PIN, latest.claudeCode),
         )
 
     private fun bumpFile(
@@ -83,7 +83,7 @@ class Machinery(
     companion object {
         private const val CATALOG = "gradle/libs.versions.toml"
         private const val COPILOT_ACTION = ".github/actions/copilot/action.yml"
-        private const val RELEASE_WORKFLOW = ".github/workflows/release.yml"
+        private const val CI_WORKFLOW = ".github/workflows/ci.yml"
 
         /** The Copilot CLI version: the default of the copilot action's `cli-version` input. */
         private val COPILOT_PIN = Regex("""cli-version:[^\n]*\n(?:[^\n]*\n)*?\s*default: (\d+(?:\.\d+)+)""")

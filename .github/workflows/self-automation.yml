@@ -1,60 +1,146 @@
 name: Self automation
 
-# The machinery looks after itself with its own reusable workflows, as an app does: pull request titles and auto-merge
-# for Dependabot's and the bot's pull requests, a retry of failed runs, then the CI-fix agent, and the issue agent.
+# The machinery looks after itself as an app does, with its own automation workflow (pull request titles, auto-merge
+# for Dependabot's and the bot's pull requests, a retry of failed runs then the CI-fix agent, the issue agent), and two
+# jobs of its own:
+# - monthly, it bumps the versions Dependabot can't see (the JDK LTS, Android's SDK levels, the Copilot CLI and Claude
+#   Code) in a pull request that merges by itself once Self CI is green, and whose release reaches every app;
+# - monthly, when settings/ changes on main, and by hand, it applies the repository settings of settings/ to every
+#   repository the bot App is installed on (the apps and the machinery). It needs the App's Administration: write
+#   permission (docs/01-once-per-account.md); .github/scripts/apply-settings.sh does the same for one repository.
 
 on:
   pull_request:
-    types: [opened, edited, reopened, synchronize, labeled]
+    types: [opened, edited, reopened, synchronize, labeled, closed]
   workflow_run:
-    workflows: [Self CI, Self release, Self refresh]
+    workflows: [Self CI]
     types: [completed]
   issues:
     types: [opened, labeled, unlabeled]
   issue_comment:
     types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  push:
+    branches: [main]
+    paths:
+      - settings/**
+      - .github/scripts/apply-settings.sh
   schedule:
     - cron: "30 8 * * 1"
+    - cron: "17 3 1 * *"
+    - cron: "47 3 2 * *"
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What to do
+        type: choice
+        options: [refresh, settings, retry-issues]
 
 permissions:
   contents: read
 
 jobs:
-  title:
-    if: github.event_name == 'pull_request'
-    permissions:
-      pull-requests: read
-    uses: ./.github/workflows/pull-request-title.yml
-
-  automerge:
-    if: github.event_name == 'pull_request' && github.event.action != 'edited'
-    permissions:
-      contents: read
-      pull-requests: read
-    uses: ./.github/workflows/automerge.yml
-    secrets: inherit
-
-  retry:
-    if: github.event_name == 'workflow_run' || github.event_name == 'schedule'
+  automation:
     permissions:
       actions: write
+      checks: read
       contents: read
-    uses: ./.github/workflows/retry.yml
-    secrets: inherit
-
-  ci-fix:
-    if: github.event_name == 'workflow_run'
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/ci-fix-agent.yml
-    secrets: inherit
-
-  issues:
-    if: github.event_name == 'issues' || github.event_name == 'issue_comment'
-    permissions:
-      contents: read
-      issues: read
+      issues: write
       pull-requests: read
-    uses: ./.github/workflows/issue-agent.yml
+    uses: ./.github/workflows/automation.yml
     secrets: inherit
+    with:
+      ci-workflow: self-ci.yml
+      weekly-schedule: "30 8 * * 1"
+      # The machinery's own refresh is the job below, not an app's
+      monthly-schedule: never
+      task: ${{ inputs.task }}
+
+  refresh:
+    name: Bump the machinery's versions
+    if: github.event.schedule == '17 3 1 * *' || (github.event_name == 'workflow_dispatch' && inputs.task == 'refresh')
+    concurrency:
+      group: self-refresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-build
+      - id: bump
+        name: Bump versions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./gradlew :tools:bump:installDist --quiet
+          tools/bump/build/install/bump/bin/bump
+      - id: token
+        if: steps.bump.outputs.changed == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          # The bump changes the pinned versions in workflow and action files
+          permission-workflows: write
+      - name: Open the pull request
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          SLUG: ${{ steps.token.outputs.app-slug }}
+        run: |
+          branch="machinery/$(date -u +%Y-%m)"
+          id="$(gh api "/users/$SLUG%5Bbot%5D" --jq .id)"
+          git config user.name "$SLUG[bot]"
+          git config user.email "$id+$SLUG[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -A
+          git commit -m "fix(deps): the monthly bump of the JDK, Android SDK and agent tools"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+          gh label create automerge --color 0E8A16 --description "Merge automatically once CI is green" --force
+          gh pr create --head "$branch" --title "fix(deps): the monthly bump of the JDK, Android SDK and agent tools" \
+            --body-file build/machinery-report.md --label automerge \
+            || gh pr edit "$branch" --body-file build/machinery-report.md
+
+  settings:
+    name: Apply the settings
+    if: >-
+      github.event_name == 'push' || github.event.schedule == '47 3 2 * *' ||
+      (github.event_name == 'workflow_dispatch' && inputs.task == 'settings')
+    concurrency:
+      group: self-settings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Every repository the App is installed on, with the permissions the settings need
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-administration: write
+          permission-issues: write
+          permission-environments: write
+      - name: Apply
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          status=0
+          for repo in $(gh api /installation/repositories --paginate --jq '.repositories[] | select(.archived | not) | .full_name'); do
+            if [ "$repo" = "$GITHUB_REPOSITORY" ]; then
+              .github/scripts/apply-settings.sh "$repo" settings/ruleset-machinery.json || status=1
+            else
+              .github/scripts/apply-settings.sh "$repo" || status=1
+            fi
+          done
+          exit $status

@@ -4,7 +4,7 @@ Do these once. Every app after the first reuses them. Each step says where to cl
 it worked. Tick the boxes as you go.
 
 Words used below:
-- **`<owner>`**: the GitHub organization that owns the apps and this machinery (step 1).
+- **`<owner>`**: the GitHub account that owns the apps and this machinery: yours, or an organization (step 1).
 - **the bot**: the GitHub App that pushes, labels and merges for the automation (step 2).
 
 ## 0. Tools on your computer
@@ -18,10 +18,10 @@ Words used below:
 - [ ] **A JDK 21 or newer** to run Gradle (Android Studio brings one), and **Claude Code** for step 4:
       <https://code.claude.com/docs>.
 
-## 1. A GitHub organization
+## 1. An organization (optional)
 
-The apps, this machinery and the template live in an organization rather than your personal account. That keeps your
-own name out of every app (workflows and plugin names mention their owner), and lets one bot serve every app.
+The apps, this machinery and the template can live in your own account: every app's workflows and the plugins' web
+address then mention your username. To keep it out, put them all in an organization instead:
 
 - [ ] github.com → your picture (top right) → **Your organizations** → **New organization** → **Free**.
 - [ ] Name: neutral and short, like a studio name. It shows in URLs (`github.com/<owner>/...`) and can be renamed
@@ -64,7 +64,8 @@ that token's pushes, so a merged update would never be released.
       The Gradle plugins are published there (`https://<owner>.github.io/app-machinery/maven`).
 - [ ] Give the machinery its secrets, as you will for each app (step 6 shows the file):
       `.github/scripts/set-secrets.sh <owner>/app-machinery machinery.env`.
-- [ ] Apply its settings once by hand: **Actions → Self settings → Run workflow**. From then on it runs monthly, for
+- [ ] Apply its settings once by hand: **Actions → Self automation → Run workflow → settings**. From then on it runs
+      monthly, and whenever `settings/` changes, for
       every repository the bot is installed on.
 
 ## 4. Claude (the main AI agent)

@@ -54,12 +54,12 @@ class MachineryTest :
                 "inputs:\n  prompt:\n    required: true\n" +
                     "  cli-version:\n    description: The CLI\n    default: 1.0.103\n",
             )
-            File(root, ".github/workflows/release.yml").writeText("run: npm i -g @anthropic-ai/claude-code@2.1.303\n")
+            File(root, ".github/workflows/ci.yml").writeText("run: npm i -g @anthropic-ai/claude-code@2.1.303\n")
             val latest = Latest(null, null, copilotCli = "1.0.110", claudeCode = "2.1.299")
             val bumps = Machinery(root).apply(latest)
             bumps.filter { it.changed }.map { it.name } shouldBe listOf("Copilot CLI")
             File(root, ".github/actions/copilot/action.yml").readText() shouldContain "default: 1.0.110\n"
-            File(root, ".github/workflows/release.yml").readText() shouldContain "claude-code@2.1.303"
+            File(root, ".github/workflows/ci.yml").readText() shouldContain "claude-code@2.1.303"
             Machinery.releaseVersion("""{"tag_name": "v1.0.110"}""") shouldBe "1.0.110"
             Machinery.npmVersion("""{"name":"x","version":"2.1.310"}""") shouldBe "2.1.310"
         }

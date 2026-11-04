@@ -17,7 +17,7 @@ are the ones that land on you, with what to do.
 | A commit is refused by CI: "header must not be longer than 100 characters" | A commit subject over 100 characters (the local hook doesn't count them) | Shorten it. A branch can't be force-pushed by the agents: open a new pull request from a rebuilt branch. |
 | A release made nothing | Only `build`, `ci`, `docs`, `refactor`, `test` or `chore` commits since the last one | Expected: `feat`, `fix`, `perf` and `revert` release. |
 | "What's new" stayed in English | No Claude token for the release, or the translation failed | The run's warnings say why. The next release translates again. |
-| Settings drifted (a rule changed by hand) | — | **app-machinery → Actions → Self settings → Run workflow** puts `settings/` back. |
+| Settings drifted (a rule changed by hand) | — | **app-machinery → Actions → Self automation → Run workflow → settings** puts `settings/` back. |
 
 When nothing here matches, open an issue in the app: the issue agent reads the logs and either fixes it or says what
 you must do.

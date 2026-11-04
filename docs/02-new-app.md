@@ -3,7 +3,7 @@
 Do these for each app, in order: later steps need earlier ones. Your accounts must be set up first
 ([01-once-per-account.md](01-once-per-account.md)).
 
-Words used below: **`<owner>`** is your GitHub organization, **`<repo>`** the app's repository name, **`<app.id>`**
+Words used below: **`<owner>`** is the GitHub account of the apps (yours, or an organization), **`<repo>`** the app's repository name, **`<app.id>`**
 the app's id (step 1).
 
 ## 1. Choose the name and the id
@@ -28,7 +28,7 @@ package and draws the icon. Commit and push to `main`.
 ## 3. Settings and secrets
 
 - [ ] **Settings**: the bot is installed on all of `<owner>`'s repositories, so its monthly run covers the new one. To
-      apply them now: in app-machinery, **Actions → Self settings → Run workflow**. Check: the repository's **Settings →
+      apply them now: in app-machinery, **Actions → Self automation → Run workflow → settings**. Check: the repository's **Settings →
       Rules → Rulesets** lists "Default".
 - [ ] **Secrets**: copy your `machinery.env` to `<repo>.env` (same private folder) and add the app's lines:
 
@@ -71,7 +71,8 @@ you; if it is ever lost, Google can reset it.
 - [ ] Merge a `feat:` or `fix:` pull request (or push one to `main`). CI runs, then the release: it builds the signed
       bundle and makes the GitHub Release `v1.0.0` with its changelog, the `.aab`, the `.apk` and `mapping.txt`.
 - [ ] "Upload to Google Play" is skipped until step 8: expected.
-- If the release ran before step 4, it failed while signing and made nothing: **Actions → Release → Re-run all jobs**.
+- If the release ran before step 4, it failed while signing and made nothing: **Actions → CI →** that run **→ Re-run
+  failed jobs**.
 
 ### 5a. The support address (first app only)
 
@@ -140,7 +141,8 @@ Google's API can't create an app, so the first bundle goes up by hand.
 - [ ] Turn the uploads on: add `PLAY_TRACK=internal` to `<repo>.env` and run `set-secrets.sh` again (or
       `gh variable set PLAY_TRACK --repo <owner>/<repo> --body internal`). Every release after this goes to Play by
       itself, with "What's new" and the update priority.
-- [ ] Replace the listing's graphics with the app's own once: **Actions → Store listing → Run workflow**.
+- [ ] Replace the listing's graphics with the app's own once: **Actions → CI → Run workflow**, on `main`, with
+      **store-listing** ticked.
 
 ## 9. Launch to production
 
@@ -162,5 +164,5 @@ Apple's steps of `docs/01-once-per-account.md` (step 8) are all there is to do.
 ## 11. The app's own extras
 
 An app's own scheduled jobs (a data refresh, say) stay in its repository; their secrets go in `<repo>.env` like the
-others. Keep the app's maintenance scope in mind for the release notes: the app's `release.yml` caller passes
+others. Keep the app's maintenance scope in mind for the release notes: the app's `ci.yml` caller passes
 `scope-notes`, e.g. `catalog: Refreshed the song catalogue.`, so that its commits read as one friendly line.

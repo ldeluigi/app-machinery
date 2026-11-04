@@ -1,4 +1,4 @@
-# The machinery's own releases (self-release.yml): feat -> minor, fix/perf/revert -> patch, BREAKING CHANGE -> major.
+# The machinery's own releases (self-ci.yml): feat -> minor, fix/perf/revert -> patch, BREAKING CHANGE -> major.
 # Apps pin a release by its commit (Dependabot moves them) and its plugins by its version.
 branches: [main]
 tagFormat: "v${version}"
