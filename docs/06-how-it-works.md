@@ -17,6 +17,8 @@ tools/bump                the versions Dependabot can't see (JDK, Android SDK, C
 gradle/libs.versions.toml every version the plugins give the apps
 settings/                 repository settings, labels and rulesets as code
 release/releaserc.yml     semantic-release, as the apps' releases run it
+.claude/skills/           the agents' skills; commit-messages (how to write commits and pull request titles that
+                          pass CI) is shared: the monthly refresh copies it into every app
 ```
 
 ## How an app calls a workflow

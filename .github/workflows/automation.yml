@@ -882,6 +882,15 @@ jobs:
           echo ".machinery/" >> .git/info/exclude
           ./.machinery/gradlew -p .machinery :tools:bump:installDist --quiet
           .machinery/tools/bump/build/install/bump/bin/bump
+      # The agents' shared skills, like how to write commit messages, come from the machinery as its versions do
+      - name: Bring the shared skills up to date
+        run: |
+          shared=(commit-messages)
+          for skill in "${shared[@]}"; do
+            rm -rf ".claude/skills/$skill"
+            mkdir -p .claude/skills
+            cp -R ".machinery/.claude/skills/$skill" .claude/skills/
+          done
       - id: token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:

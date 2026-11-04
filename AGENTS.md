@@ -11,8 +11,9 @@ before changing anything.
 2. **No personal names** or usernames of the maintainers anywhere: code, docs, settings, commit messages.
 3. **Conventional Commits** for every commit and pull request title: commits 100 characters at most, titles 90
    (squash-merging adds " (#123)"). `feat` and `fix` release a new version to every app; use `docs`, `ci`, `build`,
-   `refactor`, `test` or `chore` for what apps don't need.
-   Never put an issue number in a commit message.
+   `refactor`, `test` or `chore` for what apps don't need. Never put an issue number in a commit message, not even
+   as an example. The `commit-messages` skill (`.claude/skills/commit-messages/`) has every rule CI checks; the
+   monthly refresh copies it into every app, so change it here.
 4. **Never weaken a quality gate** of the apps or of the machinery: tests, static analysis, licence checks, required
    checks. A gate that moves gets an equal or stricter replacement.
 5. **Pin every action to a full commit SHA**, with its version in a comment.

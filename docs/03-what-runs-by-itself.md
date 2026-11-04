@@ -22,7 +22,7 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 | The `copilot` label, `@copilot`, or when Claude can't | Automation → Copilot | The Copilot CLI does the same |
 | A major update merged | Automation → upgrade | An agent adopts what the new version recommends, in a pull request that merges by itself |
 | Monday 08:30 UTC | Automation → retry-issues | Issues the agents ran out of credit for (`retry next week`) go back to the issue agent |
-| Monthly (1st) | Automation → refresh, review | JDK bump and a health report (deprecations, credentials about to expire, stuck pull requests) in a pull request; an agent fixes what code can fix, checks Google Play's and Apple's latest policies against the app, and opens one issue for what only you can do |
+| Monthly (1st) | Automation → refresh, review | JDK bump, the machinery's shared agent skills, and a health report (deprecations, credentials about to expire, stuck pull requests) in a pull request; an agent fixes what code can fix, checks Google Play's and Apple's latest policies against the app, and opens one issue for what only you can do |
 | Any of the above failing | Automation → Automation health | Recorded in the pinned "Automation health" issue, with its cause |
 | Weekly (Monday) | Dependabot | Updates of the app's libraries, and of the machinery (workflows and plugins) when it released |
 | Monthly (2nd), and when settings change | app-machinery's Self automation → settings | Every app's repository settings, labels, `release` environment and rules, as `settings/` says |
