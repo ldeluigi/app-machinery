@@ -430,7 +430,7 @@ jobs:
       - id: semantic
         name: semantic-release
         if: steps.gate.outputs.newest == 'true'
-        uses: cycjimmy/semantic-release-action@b4630c55afc332e0d8a732e0441849968e5cccaf # v8.0.0
+        uses: cycjimmy/semantic-release-action@ad51787758d9654d5a75150a89a6fa9b3ccef95e # v8.1.4
         # The preset stays on 9.x: semantic-release 25's notes generator bundles conventional-changelog-writer 8,
         # and preset 10 needs writer 9 ("Missing helper"). Move them together, after a local dry run.
         # @semantic-release/github is pinned over the action's bundled 12.0.6, whose asset uploads fail on Node 24.17+
