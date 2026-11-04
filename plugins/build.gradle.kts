@@ -1,5 +1,6 @@
 import dev.detekt.gradle.Detekt
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 
 plugins {
@@ -19,6 +20,11 @@ java {
 
 kotlin {
     compilerOptions.jvmTarget = JvmTarget.JVM_17
+}
+
+tasks.withType<KotlinCompile>().configureEach {
+    // Gradle's Kotlin DSL still passes this argument, deprecated by Kotlin 2.4.20.
+    compilerOptions.freeCompilerArgs.add("-Xwarning-level=DEPRECATED_CLI_ARG:disabled")
 }
 
 dependencies {
