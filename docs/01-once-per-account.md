@@ -62,8 +62,7 @@ that token's pushes, so a merged update would never be released.
 - [ ] Create the repository `<owner>/app-machinery`, **public**, from this one (or transfer it there).
 - [ ] **Settings → Pages → Build and deployment → Source: Deploy from a branch → `gh-pages` / `(root)` → Save.**
       The Gradle plugins are published there (`https://<owner>.github.io/app-machinery/maven`).
-- [ ] Give the machinery its secrets, as you will for each app (step 6 shows the file):
-      `.github/scripts/set-secrets.sh <owner>/app-machinery machinery.env`.
+- [ ] Give the machinery its secrets once you have them (step 6): `.github/scripts/set-secrets.sh <owner>/app-machinery`.
 - [ ] Apply its settings once by hand: **Actions → Self automation → Run workflow → settings**. From then on it runs
       monthly, and whenever `settings/` changes, for
       every repository the bot is installed on.
@@ -90,23 +89,25 @@ Copilot plan.
       requests start as drafts that wait for you): <https://github.com/settings/copilot/coding_agent> → **Repository
       access: No repositories** → Save.
 
-## 6. The secrets file
+## 6. Storing the secrets
 
-Every app gets the same secrets, from one file on your computer that you never commit. Make it once:
+Every app gets the same secrets. Keep what steps 2, 4 and 5 gave you in your password manager: the bot's Client ID and
+login, its `.pem` file, the Claude token and the Copilot token. Then, in a copy of app-machinery on your computer (on
+Windows, in Git Bash), with `gh` signed in as `<owner>`:
 
-```
-# The bot (step 2)
-GH_APP_CLIENT_ID=Iv23...
-GH_APP_LOGIN=<owner>-bot[bot]
-GH_APP_PRIVATE_KEY=@C:/path/to/the-bot.private-key.pem
-# The agents (steps 4 and 5)
-CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
-COPILOT_GITHUB_TOKEN=github_pat_...
+```sh
+.github/scripts/set-secrets.sh <owner>/<repo>
 ```
 
-Save it as `machinery.env` in a private folder (your password manager can attach it). Each app adds its own lines to a
-copy of it (docs/02-new-app.md). `.github/scripts/set-secrets.sh <owner>/<repo> <file>` stores each line where the
-workflows read it, printing only the names.
+It asks for each value in turn and says where you find it. Paste it and press Enter: secrets stay hidden as you paste
+them, and a file (the `.pem` key, later the upload key) can be dragged onto the window instead. Enter alone keeps what
+is there, so skip what you don't have yet and run it again later. It stores each value where the workflows read it and
+prints only the names.
+
+- To change one value later (a renewed token, say), name it: `.github/scripts/set-secrets.sh <owner>/<repo>
+  CLAUDE_CODE_OAUTH_TOKEN`. Any other name, like an app's own `YOUTUBE_API_KEY`, is asked for and stored as a secret.
+- Rather keep them in a file, never committed? Write `NAME=value` lines (`NAME=@path` for a file's content, like
+  `GH_APP_PRIVATE_KEY=@C:/keys/bot.pem`) and run `.github/scripts/set-secrets.sh <owner>/<repo> <file>`.
 
 ## 7. Google Play (Android)
 
@@ -135,11 +136,12 @@ workflows read it, printing only the names.
   ```
 
   This lets GitHub Actions of `<owner>`'s repositories, and nothing else, ask for the service account. Each app then
-  allows its own repository (docs/02-new-app.md). Add to the secrets file:
+  allows its own repository (docs/02-new-app.md). Keep these two in your password manager: `set-secrets.sh` asks for
+  them for every app.
 
   ```
-  GCP_WIF_PROVIDER=projects/<project-number>/locations/global/workloadIdentityPools/github/providers/github
-  GCP_SERVICE_ACCOUNT=publisher@<project-id>.iam.gserviceaccount.com
+  GCP_WIF_PROVIDER     projects/<project-number>/locations/global/workloadIdentityPools/github/providers/github
+  GCP_SERVICE_ACCOUNT  publisher@<project-id>.iam.gserviceaccount.com
   ```
 
 - [ ] **Play Console → Users and permissions → Invite new users**: `publisher@<project-id>.iam.gserviceaccount.com`,
@@ -152,17 +154,12 @@ Builds and tests for iOS run on GitHub's Macs: no Mac needed. Publishing on the 
 - [ ] **Apple Developer Program**: <https://developer.apple.com/programs/enroll/>, with an Apple Account that has
       two-factor authentication. 99 USD a year. Approval can take 48 hours. As an individual, your name is the
       seller's name on the App Store; an organization (with a D-U-N-S number) shows its own.
-- [ ] Note your **Team ID**: <https://developer.apple.com/account> → Membership details. Add `APPLE_TEAM_ID=...` to
-      the secrets file.
+- [ ] Note your **Team ID**: <https://developer.apple.com/account> → Membership details. Keep it in your password
+      manager (`APPLE_TEAM_ID`).
 - [ ] **An App Store Connect API key**, for signing and uploads from GitHub's Macs: <https://appstoreconnect.apple.com>
       → Users and Access → Integrations → **App Store Connect API** → Team Keys → **+** → name `machinery`, access
       **Admin** → Generate. Download the `.p8` file (only once!), note the **Key ID** and the **Issuer ID** above the
-      list. Add to the secrets file:
+      list. Keep the three in your password manager (`ASC_KEY_ID`, `ASC_ISSUER_ID`, and the `.p8` file as
+      `ASC_PRIVATE_KEY`).
 
-  ```
-  ASC_KEY_ID=...
-  ASC_ISSUER_ID=...
-  ASC_PRIVATE_KEY=@C:/path/to/AuthKey_XXXX.p8
-  ```
-
-  The iOS release workflow (TestFlight, then the App Store) uses them; until it exists, they wait in the file.
+  The iOS release workflow (TestFlight, then the App Store) uses them; `set-secrets.sh` asks for them with the others.

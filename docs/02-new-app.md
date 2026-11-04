@@ -30,17 +30,11 @@ package and draws the icon. Commit and push to `main`.
 - [ ] **Settings**: the bot is installed on all of `<owner>`'s repositories, so its monthly run covers the new one. To
       apply them now: in app-machinery, **Actions → Self automation → Run workflow → settings**. Check: the repository's **Settings →
       Rules → Rulesets** lists "Default".
-- [ ] **Secrets**: copy your `machinery.env` to `<repo>.env` (same private folder) and add the app's lines:
-
-  ```
-  APP_ID=<app.id>
-  APP_NAME=<the name>
-  ```
-
-  Then, from a copy of app-machinery (or with the script downloaded): 
-  `.github/scripts/set-secrets.sh <owner>/<repo> <repo>.env`.
-  Check: the repository's **Settings → Secrets and variables → Actions** lists them under Secrets and Variables, and
-  the Dependabot tab lists the agents' and the bot's.
+- [ ] **Secrets**: in a copy of app-machinery, `.github/scripts/set-secrets.sh <owner>/<repo>`, as in
+      docs/01-once-per-account.md step 6. Paste the account's values (the bot, the agents, Google Play's two), and the
+      app's id and name for `APP_ID` and `APP_NAME`. Press Enter to skip the rest: the next steps ask for them.
+      Check: the repository's **Settings → Secrets and variables → Actions** lists them under Secrets and Variables,
+      and the Dependabot tab lists the agents' and the bot's.
 
 ## 4. The upload key (Android signing)
 
@@ -51,20 +45,12 @@ you; if it is ever lost, Google can reset it.
 
   ```sh
   keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 36500
-  base64 -w0 upload.jks > upload.jks.base64
   ```
 
   It asks for a password, used for the key too. Keep `upload.jks` and the password in your password manager.
-- [ ] Add to `<repo>.env`, then run `set-secrets.sh` again:
-
-  ```
-  UPLOAD_KEYSTORE_BASE64=@upload.jks.base64
-  UPLOAD_KEYSTORE_PASSWORD=the password
-  UPLOAD_KEY_PASSWORD=the password
-  UPLOAD_KEY_ALIAS=upload
-  ```
-
-- [ ] Delete `upload.jks.base64`.
+- [ ] Store it: `.github/scripts/set-secrets.sh <owner>/<repo> UPLOAD_KEYSTORE_BASE64 UPLOAD_KEYSTORE_PASSWORD
+      UPLOAD_KEY_ALIAS UPLOAD_KEY_PASSWORD`. Drag `upload.jks` onto the window for the first, then paste the password,
+      `upload`, and the password again.
 
 ## 5. The first release (GitHub)
 
@@ -138,9 +124,8 @@ Google's API can't create an app, so the first bundle goes up by hand.
 - [ ] **Play Console → Users and permissions →** `publisher@…` **→ App permissions → Add app** → this app, with
       **Release to production, exclude devices, and use Play App Signing**, **Release apps to testing tracks** and
       **Manage store presence**. Apply.
-- [ ] Turn the uploads on: add `PLAY_TRACK=internal` to `<repo>.env` and run `set-secrets.sh` again (or
-      `gh variable set PLAY_TRACK --repo <owner>/<repo> --body internal`). Every release after this goes to Play by
-      itself, with "What's new" and the update priority.
+- [ ] Turn the uploads on: `.github/scripts/set-secrets.sh <owner>/<repo> PLAY_TRACK`, and answer `internal`. Every
+      release after this goes to Play by itself, with "What's new" and the update priority.
 - [ ] Replace the listing's graphics with the app's own once: **Actions → CI → Run workflow**, on `main`, with
       **store-listing** ticked.
 
@@ -150,7 +135,7 @@ Google's API can't create an app, so the first bundle goes up by hand.
 - [ ] A personal developer account made after November 2023 must first run a **closed test** with 12 testers for
       14 days: **Testing → Closed testing**. Older accounts and organizations skip this.
 - [ ] **Production → Countries/regions**.
-- [ ] Set `PLAY_TRACK=production`. The next `feat` or `fix` merge goes to everyone, after Google's review.
+- [ ] `.github/scripts/set-secrets.sh <owner>/<repo> PLAY_TRACK`, and answer `production`. The next `feat` or `fix` merge goes to everyone, after Google's review.
 
 ## 10. iOS
 
@@ -163,6 +148,6 @@ Apple's steps of `docs/01-once-per-account.md` (step 8) are all there is to do.
 
 ## 11. The app's own extras
 
-An app's own scheduled jobs (a data refresh, say) stay in its repository; their secrets go in `<repo>.env` like the
-others. Keep the app's maintenance scope in mind for the release notes: the app's `ci.yml` caller passes
+An app's own scheduled jobs (a data refresh, say) stay in its repository; store their secrets by name, like
+`.github/scripts/set-secrets.sh <owner>/<repo> YOUTUBE_API_KEY`. Keep the app's maintenance scope in mind for the release notes: the app's `ci.yml` caller passes
 `scope-notes`, e.g. `catalog: Refreshed the song catalogue.`, so that its commits read as one friendly line.

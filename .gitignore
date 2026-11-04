@@ -5,3 +5,6 @@ build/
 local.properties
 *.iml
 .DS_Store
+
+# Secrets files, kept outside any repository (docs/01-once-per-account.md, step 6)
+*.env
