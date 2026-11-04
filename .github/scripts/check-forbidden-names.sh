@@ -11,7 +11,7 @@ if [ ! -f "$list" ]; then
   echo "No $list: no name is forbidden."
   exit 0
 fi
-pattern="$(grep -vE '^[[:space:]]*(#|$)' "$list" | paste -sd '|' -)"
+pattern="$({ grep -vE '^[[:space:]]*(#|$)' "$list" || true; } | paste -sd '|' -)"
 [ -n "$pattern" ] || exit 0
 status=0
 

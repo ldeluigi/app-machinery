@@ -117,8 +117,11 @@ jobs:
           LIST: ${{ inputs.build-only-deps }}
         run: |
           subject="$TITLE"
+          patterns=""
           if [ "$ECOSYSTEM" = "gradle" ] && [ -f "$LIST" ]; then
-            patterns="$(grep -vE '^\s*(#|$)' "$LIST")"
+            patterns="$(grep -vE '^\s*(#|$)' "$LIST" || true)"
+          fi
+          if [ -n "$patterns" ]; then
             build_only=true
             IFS=',' read -ra deps <<< "$DEPENDENCIES"
             for dep in "${deps[@]}"; do
