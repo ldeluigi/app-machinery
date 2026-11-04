@@ -11,7 +11,7 @@ the app's id (step 1).
 - [ ] **The name** players see. It can change later, but check first that no app or trademark uses it: search Google
       Play, the App Store and the trademark registers (<https://www.tmdn.org/tmview/>, <https://tmsearch.uspto.gov/>,
       classes 9, 28 and 41 for games). Register its `.app` and `.com` domains the same day if you want them.
-- [ ] **The id** (Android application id, iOS bundle id): reverse-domain, lower case, like `party.songtimeline`. It
+- [ ] **The id** (Android application id, iOS bundle id): reverse-domain, lower case, like `com.example.myapp`. It
       **can never change** once the app is on a store, so name what the app does rather than its brand, and don't use
       your own name. Google Play and Apple both refuse an id another developer already has.
 
@@ -80,7 +80,7 @@ Google Play and the App Store show a developer email publicly, and the privacy p
 address keeps yours off the stores and forwards everything to you. One address can serve every app.
 
 - [ ] <https://accounts.google.com/signup>: name e.g. "`<App>` Support", **create your own Gmail address**,
-      brand-neutral (e.g. `partysongtimeline@gmail.com`), a strong password in your password manager, your own email
+      brand-neutral (e.g. `myapp.support@gmail.com`), a strong password in your password manager, your own email
       and phone for recovery. Personalisation: **Manual**, everything off.
 - [ ] **2-Step Verification** at <https://myaccount.google.com/security>, backup codes in your password manager.
 - [ ] Forward everything: web Gmail → ⚙ → **See all settings → Forwarding and POP/IMAP → Add a forwarding address** →

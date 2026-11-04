@@ -4,7 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.HexFormat
 
-/** The kinds of listing graphics HITSTAR draws, by the names the Google Play Developer API gives them. */
+/** The kinds of listing graphics an app draws, by the names the Google Play Developer API gives them. */
 enum class ImageType(
     val apiName: String,
 ) {
