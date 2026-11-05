@@ -111,8 +111,34 @@ class PlayNotesTest :
             ReleaseType.of("1.4.3") shouldBe ReleaseType.PATCH
         }
 
-        test("major releases force an update, features ask, fixes stay quiet") {
+        test("a patch release with maintenance changes only is maintenance, even with the app's own scopes") {
+            val scopes = PlayNotes.MAINTENANCE_SCOPES + PlayNotes.scopes("catalog: Refreshed the song catalogue.")
+            val maintenance =
+                """
+                ## [1.3.1](https://github.com/o/r/compare/v1.3.0...v1.3.1) (2026-10-15)
+
+                ### Bug Fixes
+
+                * **deps:** bump androidx.room from 2.8.5 to 2.8.6 ([fedcba9](https://github.com/o/r/commit/fedcba9))
+                * **catalog:** monthly song catalogue refresh ([0011223](https://github.com/o/r/commit/0011223))
+                """.trimIndent()
+            val fix = "$maintenance\n* **game:** the timer keeps running ([4a34383](https://github.com/o/r/c/4a34383))"
+            val unscoped = "$maintenance\n* the timer keeps running ([4a34383](https://github.com/o/r/c/4a34383))"
+            ReleaseType.of("1.3.1", maintenance, scopes) shouldBe ReleaseType.MAINTENANCE
+            ReleaseType.of("1.3.1", maintenance) shouldBe ReleaseType.PATCH
+            ReleaseType.of("1.3.1", fix, scopes) shouldBe ReleaseType.PATCH
+            ReleaseType.of("1.3.1", unscoped, scopes) shouldBe ReleaseType.PATCH
+            ReleaseType.of("1.3.1", "## 1.3.1", scopes) shouldBe ReleaseType.PATCH
+            ReleaseType.of("1.4.0", maintenance, scopes) shouldBe ReleaseType.MINOR
+        }
+
+        test("major releases force an update, features and fixes ask, maintenance stays quiet") {
             ReleaseType.entries.associateWith { it.updatePriority } shouldBe
-                mapOf(ReleaseType.MAJOR to 5, ReleaseType.MINOR to 3, ReleaseType.PATCH to 1)
+                mapOf(
+                    ReleaseType.MAJOR to 5,
+                    ReleaseType.MINOR to 3,
+                    ReleaseType.PATCH to 2,
+                    ReleaseType.MAINTENANCE to 1,
+                )
         }
     })

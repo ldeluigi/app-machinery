@@ -1,19 +1,34 @@
 package app.machinery.release
 
-/** How big a release is. [updatePriority] is how insistently the app asks users to update (Play in-app updates). */
+/**
+ * How big a release is. [updatePriority] is how insistently the app asks users to update (Play in-app updates): Play
+ * gives an app the highest priority of the versions between the installed one and the newest, so a fix still counts
+ * when maintenance releases followed it.
+ */
 enum class ReleaseType(
     val updatePriority: Int,
 ) {
     MAJOR(5),
     MINOR(3),
-    PATCH(1),
+    PATCH(2),
+
+    /** A patch release that only does maintenance (dependencies, the build, the app's own maintenance scopes). */
+    MAINTENANCE(1),
     ;
 
     companion object {
-        /** The type of the release that made [version]: semantic versioning resets what follows the bumped part. */
-        fun of(version: String): ReleaseType {
+        /**
+         * The type of the release that made [version]: semantic versioning resets what follows the bumped part. A patch
+         * release whose [changelog] lists maintenance [scopes] only is [MAINTENANCE].
+         */
+        fun of(
+            version: String,
+            changelog: String = "",
+            scopes: Map<String, String> = PlayNotes.MAINTENANCE_SCOPES,
+        ): ReleaseType {
             val (_, minor, patch) = Versions.parts(version)
             return when {
+                patch > 0 && PlayNotes.maintenanceOnly(changelog, scopes) -> MAINTENANCE
                 patch > 0 -> PATCH
                 minor > 0 -> MINOR
                 else -> MAJOR
@@ -92,12 +107,9 @@ object PlayNotes {
         changelog: String,
         scopes: Map<String, String> = MAINTENANCE_SCOPES,
     ): List<String> =
-        changelog
-            .lineSequence()
-            .map(String::trim)
-            .filter(BULLET::containsMatchIn)
+        bullets(changelog)
             .map { line ->
-                scopes[SCOPE.find(line)?.groupValues?.get(1)]
+                scopes[scope(line)]
                     ?: line
                         .replace(BULLET, "")
                         .replace(SCOPE_LABEL, "")
@@ -110,6 +122,25 @@ object PlayNotes {
             }.distinct()
             .toList()
             .ifEmpty { listOf(NO_CHANGES) }
+
+    /**
+     * Whether [changelog] lists changes and all of them have maintenance [scopes]: nothing users would notice, so the
+     * app doesn't ask them to update.
+     */
+    fun maintenanceOnly(
+        changelog: String,
+        scopes: Map<String, String> = MAINTENANCE_SCOPES,
+    ): Boolean {
+        val lines = bullets(changelog).toList()
+        return lines.isNotEmpty() && lines.all { scope(it) in scopes }
+    }
+
+    /** The lines of [changelog] that list a change. */
+    private fun bullets(changelog: String): Sequence<String> =
+        changelog.lineSequence().map(String::trim).filter(BULLET::containsMatchIn)
+
+    /** The scope of a changelog [line], `deps` in `* **deps:** bump ...`, if it has one. */
+    private fun scope(line: String): String? = SCOPE.find(line)?.groupValues?.get(1)
 
     /**
      * Google Play's notes for [releases], newest first: each release's version as the app shows it, then its changes

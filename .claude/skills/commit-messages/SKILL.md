@@ -53,7 +53,7 @@ This skill is app-machinery's: its monthly refresh copies it into every app. Cha
 | Type | Release | In an app |
 |---|---|---|
 | `feat` | minor, like 1.4.0 | a line of "What's new"; in-app update priority 3 |
-| `fix`, `perf`, `revert` | patch, like 1.3.1 | a line of "What's new"; in-app update priority 1 |
+| `fix`, `perf`, `revert` | patch, like 1.3.1 | a line of "What's new"; in-app update priority 2, or 1 when every change of the release has a maintenance scope |
 | any type with `!` or `BREAKING CHANGE` | major, like 2.0.0 | in-app update priority 5 |
 | `refactor`, `build`, `ci`, `docs`, `test`, `chore`, `style` | none | nothing |
 
@@ -70,7 +70,9 @@ what they notice: `fix(game): the timer keeps running when the phone locks`, not
 
 Maintenance scopes become one fixed line each, whatever their descriptions: `deps` ("Updated components for stability
 and security."), `machinery` and `build` ("Kept the app up to date with the latest Android versions."), and the app's
-own, listed under `scope-notes` in its `.github/workflows/ci.yml` (`catalog`, say).
+own, listed under `scope-notes` in its `.github/workflows/ci.yml` (`catalog`, say). A patch release made of
+maintenance scopes only gets in-app update priority 1, which apps keep quiet; one fix players notice makes it 2. So a
+fix players notice takes a scope that isn't a maintenance one, and a dependency bump always takes `deps`.
 
 ## Before pushing
 

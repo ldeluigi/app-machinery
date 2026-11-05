@@ -12,7 +12,8 @@ import java.io.File
  * for the first release); `GITHUB_REPOSITORY`, `GITHUB_API_URL` and `GH_TOKEN` to read the earlier releases (only
  * this one's changes without them); `APP_NAME` and `APP_ABOUT` (what the app is, for the translations), `TRANSLATIONS`
  * (the app's Compose resources, whose `values-*` folders give its languages) and `SCOPE_NOTES` (the app's own
- * maintenance scopes, `scope: line` each). Writes `type` and `priority` to `$GITHUB_OUTPUT` in GitHub Actions.
+ * maintenance scopes, `scope: line` each). Writes `type` and `priority` to `$GITHUB_OUTPUT` in GitHub Actions: a patch
+ * release that only does maintenance gets a lower priority than one that fixes something.
  */
 fun main() {
     val name = env("APP_NAME") ?: "The app"
@@ -29,7 +30,7 @@ fun main() {
     val about = listOfNotNull(name, env("APP_ABOUT")).joinToString(", ")
     val english = mapOf(PlayLanguages.DEFAULT to PlayNotes.compose(releases))
     val notes = english + translated(PlayNotes.shown(releases), about)
-    val type = ReleaseType.of(version)
+    val type = ReleaseType.of(version, env("RELEASE_NOTES").orEmpty(), scopes)
     File("whatsnew").mkdirs()
     notes.forEach { (language, text) -> File("whatsnew/whatsnew-$language").writeText(text) }
     println(
