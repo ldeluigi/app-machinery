@@ -135,12 +135,22 @@ jobs:
             if [ "$build_only" = true ]; then subject="build(deps):${TITLE#*:}"; fi
           fi
           echo "subject=$subject" >> "$GITHUB_OUTPUT"
+      # Two runs for one pull request (opened and labeled together) ask at once, and GitHub refuses the second one with
+      # "Merge already in progress": that is a success once the first one's request went through
       - name: Enable auto-merge
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           SUBJECT: ${{ steps.subject.outputs.subject }}
-        run: gh pr merge --auto --squash --subject "$SUBJECT" "$PR_URL"
+        run: |
+          for attempt in 1 2 3; do
+            gh pr merge --auto --squash --subject "$SUBJECT" "$PR_URL" && exit 0
+            sleep $((attempt * 10))
+            enabled="$(gh pr view "$PR_URL" --json state,autoMergeRequest \
+              --jq 'if .state == "MERGED" or .autoMergeRequest != null then "yes" else "" end')"
+            if [ -n "$enabled" ]; then echo "Another run enabled auto-merge first."; exit 0; fi
+          done
+          exit 1
 
   automerge-bot:
     name: Bot pull requests
@@ -159,11 +169,20 @@ jobs:
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
+      # As for Dependabot's: a run that loses the race to another one for the same pull request still succeeds
       - name: Enable auto-merge
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: |
+          for attempt in 1 2 3; do
+            gh pr merge --auto --squash "$PR_URL" && exit 0
+            sleep $((attempt * 10))
+            enabled="$(gh pr view "$PR_URL" --json state,autoMergeRequest \
+              --jq 'if .state == "MERGED" or .autoMergeRequest != null then "yes" else "" end')"
+            if [ -n "$enabled" ]; then echo "Another run enabled auto-merge first."; exit 0; fi
+          done
+          exit 1
 
   rerun:
     name: Re-run failed jobs once
@@ -247,6 +266,7 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           WORKFLOW: ${{ github.event.workflow_run.name }}
         run: |
@@ -254,6 +274,13 @@ jobs:
           echo "pull-request=$number" >> "$GITHUB_OUTPUT"
           echo "engine=claude" >> "$GITHUB_OUTPUT"
           if [ -z "$number" ]; then
+            # The branch's pull request was merged or closed since the run, and its branch is usually gone with it
+            ended="$(gh pr list --head "$BRANCH" --state all --json number,state \
+              --jq '[.[] | select(.state != "OPEN")][0].number // empty')"
+            if [ "$BRANCH" != "$DEFAULT_BRANCH" ] && [ -n "$ended" ]; then
+              echo "#$ended, the pull request of $BRANCH, was merged or closed: nothing is left to fix."
+              exit 0
+            fi
             echo "go=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -1066,7 +1093,12 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           title="Automation health"
-          number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number')"
+          # Listed, not searched: the search index lags seconds behind, so two runs failing together opened one each
+          health_issue() {
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 1000 --json number,title \
+              --jq "[.[] | select(.title == \"$title\") | .number] | min // empty"
+          }
+          number="$(health_issue)"
           failed="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" --paginate \
             --jq '.jobs[] | select(.conclusion == "failure") | .name' | paste -sd ',' - | sed 's/,/, /g')"
           # The runner's own "exit code" lines and the actions' generic "failed" lines say nothing about the cause
@@ -1081,9 +1113,16 @@ jobs:
           line="- $(date -u +%Y-%m-%d) **$NAME** ($failed) failed: $URL${why:+. $why}"
           if [ -z "$number" ]; then
             gh label create needs-human --color D93F0B --description "Automation could not handle this" --force --repo "$GITHUB_REPOSITORY"
-            number="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label needs-human \
+            created="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label needs-human \
               --body "Failures of the automation itself are listed here (agents never retry their own failures)." \
               | grep -o '[0-9]*$')"
-            gh issue pin "$number" --repo "$GITHUB_REPOSITORY" || true
+            # Runs that fail at the same moment may each have created one: the oldest stays, the others close
+            number="$(health_issue)"
+            if [ "${number:-$created}" != "$created" ]; then
+              gh issue close "$created" --repo "$GITHUB_REPOSITORY" --reason "not planned" --comment "Duplicate of #$number."
+            else
+              number="$created"
+              gh issue pin "$number" --repo "$GITHUB_REPOSITORY" || true
+            fi
           fi
           gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$line"
