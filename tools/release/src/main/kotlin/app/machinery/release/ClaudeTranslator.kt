@@ -15,6 +15,7 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
@@ -37,19 +38,31 @@ class ClaudeTranslator(
     ): Map<String, List<String>> {
         val dir = Files.createTempDirectory("translate")
         try {
-            val request = dir.resolve("request.json")
-            val output = dir.resolve("output.json")
-            val errors = dir.resolve("errors.txt")
-            request.writeText(request(lines, languages).toString())
-            val arguments =
+            dir.resolve(REQUEST).writeText(request(lines, languages).toString())
+            val schema = schema(languages, lines.size).toString()
+            return try {
+                parse(ask(dir, BEST, schema))
+            } catch (e: IOException) {
+                // The best model's own usage credit can run out before the plan's, and --fallback-model doesn't step in
+                if (!modelSpent(e.message.orEmpty())) throw e
+                parse(ask(dir, OPUS, schema))
+            }
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /** Claude Code's JSON answer to the request in [dir], from the [model] its `--model` arguments name. */
+    private fun ask(
+        dir: Path,
+        model: List<String>,
+        schema: String,
+    ): String {
+        val output = dir.resolve("output.json")
+        val errors = dir.resolve("errors.txt")
+        val arguments =
+            listOf("--print", "--output-format", "json") + model +
                 listOf(
-                    "--print",
-                    "--output-format",
-                    "json",
-                    "--model",
-                    "best",
-                    "--fallback-model",
-                    "opus",
                     "--tools",
                     "",
                     "--strict-mcp-config",
@@ -57,35 +70,43 @@ class ClaudeTranslator(
                     "--system-prompt",
                     instructions(app),
                     "--json-schema",
-                    schema(languages, lines.size).toString(),
+                    schema,
                 )
-            val claude =
-                ProcessBuilder(listOf(command) + arguments.map(::quoted))
-                    .directory(dir.toFile())
-                    .redirectInput(request.toFile())
-                    .redirectOutput(output.toFile())
-                    .redirectError(errors.toFile())
-            claude.environment().keys.removeIf { it.uppercase() !in ENVIRONMENT }
-            val process = claude.start()
-            if (!process.waitFor(timeoutMinutes, TimeUnit.MINUTES)) {
-                process.destroyForcibly()
-                throw IOException("Claude Code took more than $timeoutMinutes minutes")
-            }
-            val answer = output.readText()
-            if (answer.isBlank()) {
-                throw IOException(
-                    "Claude Code stopped (${process.exitValue()}): ${errors.readText().take(ERROR_CHARS)}",
-                )
-            }
-            return parse(answer)
-        } finally {
-            dir.toFile().deleteRecursively()
+        val claude =
+            ProcessBuilder(listOf(command) + arguments.map(::quoted))
+                .directory(dir.toFile())
+                .redirectInput(dir.resolve(REQUEST).toFile())
+                .redirectOutput(output.toFile())
+                .redirectError(errors.toFile())
+        claude.environment().keys.removeIf { it.uppercase() !in ENVIRONMENT }
+        val process = claude.start()
+        if (!process.waitFor(timeoutMinutes, TimeUnit.MINUTES)) {
+            process.destroyForcibly()
+            throw IOException("Claude Code took more than $timeoutMinutes minutes")
         }
+        val answer = output.readText()
+        if (answer.isBlank()) {
+            throw IOException("Claude Code stopped (${process.exitValue()}): ${errors.readText().take(ERROR_CHARS)}")
+        }
+        return answer
     }
 
     companion object {
         private const val TIMEOUT_MINUTES = 10L
         private const val ERROR_CHARS = 500
+        private const val REQUEST = "request.json"
+
+        /** The best model the plan has (Fable, or else Opus), and Opus when that one is overloaded or unavailable. */
+        val BEST = listOf("--model", "best", "--fallback-model", "opus")
+
+        /** Opus, when the best model's own usage credit has run out. */
+        val OPUS = listOf("--model", "opus")
+
+        /** What Claude Code answers when a model's own usage credit has run out, and another model's hasn't. */
+        private val MODEL_SPENT = Regex("switch to another model", RegexOption.IGNORE_CASE)
+
+        /** Whether Claude Code's error [message] says that the model's own usage credit ran out. */
+        fun modelSpent(message: String): Boolean = MODEL_SPENT.containsMatchIn(message)
 
         private val WINDOWS = System.getProperty("os.name").startsWith("Windows")
         private val QUOTE = Regex("""(\\*)"""")

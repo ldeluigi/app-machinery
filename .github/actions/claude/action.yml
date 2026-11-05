@@ -2,9 +2,9 @@ name: Claude
 description: >-
   Runs Claude Code (Anthropic's Claude Code action) as the bot App, on the owner's Claude subscription
   (CLAUDE_CODE_OAUTH_TOKEN) or an Anthropic API key, with the best model the plan has (Fable, or else Opus) at
-  extra-high effort, and Opus when that model is unavailable: never a smaller model. Without a Claude credential it
-  does nothing and "done" stays false. The bot App token has no Workflows permission, so Claude can't
-  change workflow files. Expects the app checked out without credentials or with the bot App's (git sends a
+  extra-high effort, and Opus when that model is unavailable or its own usage credit has run out: never a smaller
+  model. Without a Claude credential it does nothing and "done" stays false. The bot App token has no Workflows
+  permission, so Claude can't change workflow files. Expects the app checked out without credentials or with the bot App's (git sends a
   checkout's token on push before the bot App token this action sets), and the machinery checked out in .machinery.
 inputs:
   prompt:
@@ -39,7 +39,7 @@ inputs:
 outputs:
   done:
     description: '"true" when Claude ran and finished'
-    value: ${{ steps.run.outputs.conclusion == 'success' }}
+    value: ${{ steps.run.outputs.conclusion == 'success' || steps.opus.outputs.conclusion == 'success' }}
   error:
     description: Why Claude couldn't finish, when it ran and failed
     value: ${{ steps.why.outputs.reason }}
@@ -48,7 +48,7 @@ outputs:
     value: ${{ steps.why.outputs.out-of-credit == 'true' }}
   branch-name:
     description: The branch Claude created for an issue, if any
-    value: ${{ steps.run.outputs.branch_name }}
+    value: ${{ steps.opus.outputs.branch_name || steps.run.outputs.branch_name }}
   app-token:
     description: The bot App token Claude used
     value: ${{ steps.token.outputs.token }}
@@ -82,8 +82,21 @@ runs:
         permission-contents: write
         permission-pull-requests: write
         permission-issues: write
+    # Claude Code's arguments but the model, the same for both runs below. The effort is explicit because Opus's own
+    # default is only "medium".
+    - id: args
+      if: steps.auth.outputs.ready == 'true'
+      shell: bash
+      env:
+        ARGS: >-
+          --effort xhigh --permission-mode acceptEdits
+          --allowedTools "Bash(./gradlew:*),Bash(.machinery/.github/scripts/check-forbidden-names.sh:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git switch:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(head:*),Bash(tail:*)"
+          ${{ inputs.allowed-tools && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
+      run: echo "common=$ARGS" >> "$GITHUB_OUTPUT"
+    # A failure is settled below: Opus may take over, and the last step fails the action when no run finished
     - id: run
       if: steps.auth.outputs.ready == 'true'
+      continue-on-error: true
       uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1.0.266
       with:
         claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
@@ -100,16 +113,43 @@ runs:
                    "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}}
         # "best" is Fable on a plan that has it, Opus otherwise; a plan without Fable once got Fable anyway, which
         # refused every run in 2 seconds, so check a run after a plan change (and set --model opus if that is back).
-        # The fallback only covers an overloaded or unavailable model, not a refused one or a used-up quota. The
-        # effort is explicit because Opus's own default is only "medium".
-        claude_args: >-
-          --model best --fallback-model opus --effort xhigh --permission-mode acceptEdits
-          --allowedTools "Bash(./gradlew:*),Bash(.machinery/.github/scripts/check-forbidden-names.sh:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git switch:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(head:*),Bash(tail:*)"
-          ${{ inputs.allowed-tools && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
+        # The fallback only covers an overloaded or unavailable model, not a refused one or a used-up quota: the
+        # next steps cover the best model's own credit running out.
+        claude_args: --model best --fallback-model opus ${{ steps.args.outputs.common }}
+        prompt: ${{ inputs.prompt }}
+    # Fable has a usage credit of its own, which can run out before the plan's: Claude Code then stops at once with
+    # "You're out of usage credits. Switch to another model to continue." Only the run's result is read, not what
+    # Claude read or wrote on the way, which could quote that sentence.
+    - id: spent
+      if: ${{ !cancelled() && steps.run.outcome == 'failure' }}
+      shell: bash
+      run: |
+        file="$RUNNER_TEMP/claude-execution-output.json"
+        [ -s "$file" ] || exit 0
+        result="$(jq -r '([.[] | select(.type == "result")] | last | .result) // ""' "$file")"
+        if printf '%s' "$result" | grep -qi 'switch to another model'; then
+          echo "::notice::The best model's usage credit ran out, so Opus takes over."
+          echo "opus=true" >> "$GITHUB_OUTPUT"
+        fi
+    - id: opus
+      if: ${{ !cancelled() && steps.spent.outputs.opus == 'true' }}
+      continue-on-error: true
+      uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1.0.266
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        anthropic_api_key: ${{ inputs.anthropic-api-key }}
+        github_token: ${{ steps.token.outputs.token }}
+        allowed_bots: ${{ inputs.allowed-bots }}
+        track_progress: ${{ inputs.track-progress }}
+        branch_prefix: ${{ inputs.branch-prefix }}
+        settings: |
+          {"env": {"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "2700000",
+                   "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}}
+        claude_args: --model opus ${{ steps.args.outputs.common }}
         prompt: ${{ inputs.prompt }}
     # Claude's last word, which callers post (a CI fix code can't make, say)
     - id: answer
-      if: steps.run.outcome == 'success'
+      if: steps.run.outcome == 'success' || steps.opus.outcome == 'success'
       shell: bash
       run: |
         file="$RUNNER_TEMP/claude-execution-output.json"
@@ -120,7 +160,7 @@ runs:
     # The action's log hides why Claude failed (show_full_output would print every tool result too), but its execution
     # file keeps Claude Code's last word: that reason becomes the run's error and goes on Claude's comment
     - id: why
-      if: ${{ !cancelled() && steps.run.outcome == 'failure' }}
+      if: ${{ !cancelled() && steps.run.outcome == 'failure' && steps.opus.outcome != 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -155,3 +195,8 @@ runs:
               -f body="$(printf '%s\n\n**Why:** %s' "$body" "$reason")" || true
           fi
         fi
+    # The runs above may fail without failing the action, so that Opus can take over: it fails here when none finished
+    - name: Fail when Claude couldn't finish
+      if: ${{ !cancelled() && steps.run.outcome == 'failure' && steps.opus.outcome != 'success' }}
+      shell: bash
+      run: exit 1
