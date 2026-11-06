@@ -34,8 +34,9 @@ mkdir -p "$(dirname "$report")"
   echo
   echo "## Stuck items"
   echo
-  gh pr list --label needs-human --json number,title --jq '.[] | "- #\(.number) \(.title) (needs-human)"'
-  gh pr list --author "app/dependabot" --json number,title,createdAt \
-    --jq '.[] | select((now - (.createdAt | fromdateiso8601)) > 1209600) | "- #\(.number) \(.title) (open for more than 14 days)"'
+  # Numbers, not titles: the review agent reads this report, and a title can be anyone's (GitHub links the numbers)
+  gh pr list --label needs-human --json number --jq '.[] | "- #\(.number) (needs-human)"'
+  gh pr list --author "app/dependabot" --json number,createdAt \
+    --jq '.[] | select((now - (.createdAt | fromdateiso8601)) > 1209600) | "- #\(.number) (open for more than 14 days)"'
 } >> "$report"
 cat "$report"

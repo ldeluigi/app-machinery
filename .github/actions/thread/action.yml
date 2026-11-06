@@ -1,0 +1,45 @@
+name: Thread
+description: >-
+  What an AI agent may read of an issue or pull request, in Markdown, from tools/thread: what the repository's
+  maintainers (write access) and the bot App wrote, and what anyone else wrote before a maintainer last called an agent
+  there (@claude or @copilot, or adding the claude or copilot label) and hasn't edited since, all without the text the
+  page doesn't show (HTML and Markdown comments, invisible characters, images' descriptions, ...). The agents read
+  issues, pull requests and comments only from here, so that no one else can steer them. With `caller`, it fails
+  before reading anything unless the caller is a maintainer or the bot App. Expects the machinery checked out in
+  .machinery.
+inputs:
+  number:
+    description: The issue or pull request
+    required: true
+  caller:
+    description: Who called the agent (the event's sender), checked first; empty to skip the check
+    default: ""
+  bot:
+    description: The bot App's login, whose posts (the agents' answers, the automation's reports) are read as they are
+    default: ""
+  token:
+    description: A token that reads the repository's issues and pull requests
+    default: ${{ github.token }}
+outputs:
+  text:
+    description: The thread, in Markdown (60 kB at most, for the prompt)
+    value: ${{ steps.read.outputs.text }}
+runs:
+  using: composite
+  steps:
+    - uses: ./.machinery/.github/actions/setup-build
+    - id: read
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        NUMBER: ${{ inputs.number }}
+        CALLER: ${{ inputs.caller }}
+        BOT_LOGIN: ${{ inputs.bot }}
+      run: |
+        ./.machinery/gradlew -p .machinery :tools:thread:installDist --quiet
+        file="$RUNNER_TEMP/thread-$NUMBER.md"
+        args=("$NUMBER" "$file")
+        [ -z "$CALLER" ] || args+=(--caller "$CALLER")
+        .machinery/tools/thread/build/install/thread/bin/thread "${args[@]}"
+        delimiter="EOF-$(openssl rand -hex 8)"
+        printf 'text<<%s\n%s\n%s\n' "$delimiter" "$(cat "$file")" "$delimiter" >> "$GITHUB_OUTPUT"

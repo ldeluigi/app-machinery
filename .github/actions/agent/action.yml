@@ -13,7 +13,9 @@ inputs:
     description: '"claude" (Claude, then Copilot) or "copilot" (Copilot only)'
     default: claude
   allowed-commands:
-    description: Shell commands allowed on top of the usual ones (Gradle, local git, reading files), comma-separated
+    description: >-
+      Shell commands allowed on top of the usual ones (Gradle, local git, reading files), comma-separated; never one
+      that reads issues, pull requests or comments (AGENTS.md)
     default: ""
   web:
     description: '"true" to let the agent read web pages (release notes, migration guides)'

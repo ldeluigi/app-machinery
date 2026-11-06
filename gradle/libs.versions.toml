@@ -20,6 +20,8 @@ junit4 = "4.13.2"
 robolectric = "4.17"
 # Unicode plural rules for the translation check (build only)
 icu4j = "79.1"
+# The Markdown parser of the agents' threads (tools/thread, the machinery's own)
+commonmark = "0.31.0"
 # Android SDK levels: not library versions, bumped by the monthly machinery refresh
 android-compileSdk = "37"
 android-targetSdk = "37"
@@ -39,6 +41,8 @@ kotest-gradlePlugin = { module = "io.kotest:io.kotest.gradle.plugin", version.re
 ksp-gradlePlugin = { module = "com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin", version.ref = "ksp" }
 compose-multiplatform-gradlePlugin = { module = "org.jetbrains.compose:compose-gradle-plugin", version.ref = "compose-multiplatform" }
 icu4j = { module = "com.ibm.icu:icu4j", version.ref = "icu4j" }
+commonmark = { module = "org.commonmark:commonmark", version.ref = "commonmark" }
+commonmark-footnotes = { module = "org.commonmark:commonmark-ext-footnotes", version.ref = "commonmark" }
 
 # Libraries the conventions add to the apps' modules (listed in plugins/build.gradle.kts)
 cmp-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
