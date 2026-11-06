@@ -18,7 +18,7 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 | The `ios` label on a pull request | Automation → Build for iOS too | Starts CI on the pull request's branch, with its iOS build |
 | A failed CI run | Automation → Re-run failed jobs once | Network hiccups and lost runners fix themselves |
 | A run that failed twice | Automation → CI-fix agent | An agent fixes it, on the pull request's branch or in a new pull request; after three attempts, `needs-human` and an issue |
-| A new issue, the `claude` label, or `@claude` in a comment | Automation → Claude | Claude works on it; the bot opens the pull request, which closes the issue and merges by itself once CI is green |
+| A new issue, the `claude` label, or `@claude` in a comment, from a maintainer | Automation → Claude | Claude works on it; the bot opens the pull request, which closes the issue and merges by itself once CI is green |
 | The `copilot` label, `@copilot`, or when Claude can't | Automation → Copilot | The Copilot CLI does the same |
 | A major update merged | Automation → upgrade | An agent adopts what the new version recommends, in a pull request that merges by itself |
 | Monday 08:30 UTC | Automation → retry-issues | Issues the agents ran out of credit for (`retry next week`) go back to the issue agent |
@@ -37,7 +37,7 @@ Automation it starts the refresh, or the retry of the issues, at once.
 | `needs-human` | The automation stopped: you take it from here. Add it to an issue to keep the agents off it. |
 | `automerge` | Merges by itself once CI is green. |
 | `agent` | Opened by an AI agent. |
-| `claude` / `copilot` | Hands an issue (or a failing pull request) to that agent. |
+| `claude` / `copilot` | Hands an issue (or a failing pull request) to that agent. Added by a maintainer, it lets the agent read what others wrote there so far. |
 | `ios` | Builds and tests the pull request for iOS too (macOS minutes cost ten times Linux ones on a private repository). |
 | `major-update` | A major dependency update: the upgrade agent follows up after it merges. |
 | `autofix-1` … `autofix-3` | The CI-fix agent's attempts on a pull request. |
@@ -48,3 +48,9 @@ Automation it starts the refresh, or the retry of the issues, at once.
 
 They never change workflow files (the bot's token for their commits has no Workflows permission), never touch what an
 app's AGENTS.md reserves for you, and never merge anything that isn't green.
+
+They only take orders from maintainers (people with write access) and read only what can't trick them. An agent reads
+what maintainers and the bot wrote on an issue or pull request. What anyone else wrote, it reads only as it stood when
+a maintainer last called an agent there (`@claude`, `@copilot`, or adding their label): read the thread before you call
+one. Even then, it never sees the text the page doesn't show you, like HTML comments, invisible characters or image
+descriptions. Each left-out post keeps a line saying who wrote it and why it was left out.

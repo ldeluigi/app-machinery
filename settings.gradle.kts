@@ -34,3 +34,4 @@ rootProject.name = "app-machinery"
 
 include(":tools:release")
 include(":tools:bump")
+include(":tools:thread")

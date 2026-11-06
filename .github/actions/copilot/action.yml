@@ -2,9 +2,11 @@ name: Copilot
 description: >-
   Runs the GitHub Copilot CLI headless on the checked-out repository, on the owner's Copilot plan
   (COPILOT_GITHUB_TOKEN), with the model Copilot picks itself (auto). Copilot edits and commits locally and pushes
-  nothing: the calling job pushes its commits as the bot App, whose token has no Workflows permission. Without the
-  token it does nothing and "done" stays false. The CLI's version is pinned below; the machinery's monthly refresh
-  moves it. Expects the machinery checked out in .machinery.
+  nothing: the calling job pushes its commits as the bot App, whose token has no Workflows permission. Copilot reads
+  of GitHub only what the prompt holds (callers put what the agent may read of an issue or pull request there, from
+  .github/actions/thread): no command of its own reads issues, pull requests or comments. Without the token it does
+  nothing and "done" stays false. The CLI's version is pinned below; the machinery's monthly refresh moves it.
+  Expects the machinery checked out in .machinery.
 inputs:
   prompt:
     description: What Copilot does
@@ -13,7 +15,9 @@ inputs:
     description: COPILOT_GITHUB_TOKEN, a fine-grained token with the Copilot Requests permission
     default: ""
   allowed-commands:
-    description: Shell commands allowed on top of the usual ones, comma-separated, e.g. "gh release view,gh pr list"
+    description: >-
+      Shell commands allowed on top of the usual ones, comma-separated, e.g. "gh release view"; never one that reads
+      issues, pull requests or comments (AGENTS.md)
     default: ""
   cli-version:
     description: The Copilot CLI release (github/copilot-cli) to run
@@ -62,8 +66,8 @@ runs:
         (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS.txt && tar -xzf copilot-linux-x64.tar.gz)
         echo "$dir" >> "$GITHUB_PATH"
         echo "Copilot CLI $version"
-    # The same tools as Claude's (.github/actions/claude), plus reading the issue or pull request with the read-only
-    # workflow token. The CLI's GitHub MCP server is off: it would act with COPILOT_GITHUB_TOKEN, a user token.
+    # The same tools as Claude's (.github/actions/claude), and the caller's commands with the read-only workflow token.
+    # The CLI's GitHub MCP server is off: it would act with COPILOT_GITHUB_TOKEN, a user token, and read anyone's posts.
     - id: run
       if: steps.auth.outputs.ready == 'true'
       shell: bash
@@ -91,7 +95,6 @@ runs:
           --allow-tool 'shell(git status:*)' --allow-tool 'shell(git diff:*)' --allow-tool 'shell(git log:*)' \
           --allow-tool 'shell(git show:*)' --allow-tool 'shell(git switch:*)' --allow-tool 'shell(git add:*)' \
           --allow-tool 'shell(git rm:*)' --allow-tool 'shell(git commit:*)' \
-          --allow-tool 'shell(gh issue view:*)' --allow-tool 'shell(gh pr view:*)' --allow-tool 'shell(gh pr diff:*)' \
           --allow-tool 'shell(ls:*)' --allow-tool 'shell(cat:*)' --allow-tool 'shell(grep:*)' \
           --allow-tool 'shell(head:*)' --allow-tool 'shell(tail:*)' "${extra[@]}" \
           > "$response" 2> "$log" || status=$?

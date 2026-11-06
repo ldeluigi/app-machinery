@@ -8,12 +8,15 @@ For changing the machinery, or understanding why it is built this way.
 .github/workflows/        the two reusable workflows the apps call: ci.yml (checks, Android and iOS builds, release,
                           Google Play) and automation.yml (auto-merge, retries, the AI agents, the monthly refresh,
                           the health report); and the machinery's own, self-ci.yml and self-automation.yml
-.github/actions/          setup-build, claude, copilot, agent (Claude, then Copilot), publish-commits
+.github/actions/          setup-build, claude, copilot, agent (Claude, then Copilot), publish-commits, thread (what an
+                          agent may read of an issue or pull request)
 .github/scripts/          the scripts the workflows and you run: forbidden names, issue references, health report,
                           settings, secrets, take-agents-off, out-of-credit
 plugins/                  the Gradle convention plugins (machinery.*), published on the machinery's GitHub Pages
 tools/release             the stores' "What's new" (translated by Claude) and the listing's graphics
 tools/bump                the versions Dependabot can't see (JDK, Android SDK, Copilot CLI, Claude Code)
+tools/thread              the only GitHub text the agents read: an issue's or pull request's conversation, as far
+                          as maintainers wrote or saw it, without what the page doesn't show
 gradle/libs.versions.toml every version the plugins give the apps
 settings/                 repository settings, labels and rulesets as code
 release/releaserc.yml     semantic-release, as the apps' releases run it
@@ -67,3 +70,23 @@ brings them all, tested together. The app's own catalog lists only the libraries
 - **The bot rather than the workflow token**: GitHub starts no workflow from the workflow token's pushes and merges.
 - **Agents never change workflows**: the bot's token for their commits has no Workflows permission, so an agent can't
   widen its own powers.
+- **Only maintainers steer the agents**: anyone can write on a public repository's issues, and text an agent reads can
+  carry instructions (prompt injection). So an agent's prompt holds all it reads of GitHub, from `tools/thread`, and
+  no agent has a command that reads issues, pull requests or comments, nor a token that writes (the workflow pushes
+  and posts for it):
+  - only maintainers (write, maintain or admin access, asked of GitHub: an issue's "collaborator" or "member"
+    association counts read-only people too) and the bot App can start an agent;
+  - the agent reads all that maintainers and the bot wrote; what others wrote, only as it stood when a maintainer last
+    called an agent there (`@claude`, `@copilot`, or adding their label by hand), since the maintainer could read it
+    then: a post or an edit from even a second later is left out, and so is a title changed since. The bot's own
+    labels (Copilot taking over, the Monday retry) aren't a maintainer's call;
+  - the text the page doesn't show is left out of all of it, so that nothing can hide from the maintainer who calls the
+    agent: HTML and Markdown comments (`[//]: # (...)`), tags and their attributes (images' descriptions, tooltips),
+    `hidden` elements, invisible characters (zero-width, direction marks, Unicode tags, variation selectors), images,
+    math that hides or recolours text, Mermaid diagrams, code blocks' info strings, others' link targets, posts the page
+    hides. The Markdown is parsed as CommonMark, as GitHub parses it, so that a trick can't look like code to the tool
+    and like a comment to the page;
+  - each post is quoted under a heading saying who wrote it, which a post can't fake.
+
+  Web pages, release notes and logs, which the CI-fix, upgrade and review agents need, stay untrusted data that their
+  prompts say never to obey.
