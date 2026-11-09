@@ -1,0 +1,43 @@
+name: Bundle commits
+description: >-
+  Hands the commits an AI agent made locally (since `start`) to the job that publishes them, as a git bundle in an
+  artifact of the run. The agent's job holds nothing that can push: .github/actions/publish-commits, in a job where no
+  agent ran, fetches the bundle and pushes its commits as the bot App.
+inputs:
+  start:
+    description: The commit the agent started from
+    required: true
+  name:
+    description: The artifact's name, its own in the run
+    required: true
+outputs:
+  commits:
+    description: How many commits are handed over ("0" when the agent committed nothing)
+    value: ${{ steps.bundle.outputs.commits }}
+runs:
+  using: composite
+  steps:
+    - id: bundle
+      shell: bash
+      env:
+        START: ${{ inputs.start }}
+      run: |
+        if [ -n "$(git status --porcelain -- . ':!.machinery')" ]; then
+          echo "::warning::The agent left changes it didn't commit, which are lost with this runner:"
+          git status --short -- . ':!.machinery'
+        fi
+        commits="$(git rev-list --count "$START..HEAD")"
+        echo "commits=$commits" >> "$GITHUB_OUTPUT"
+        if [ "$commits" -eq 0 ]; then
+          echo "The agent committed nothing."
+          exit 0
+        fi
+        mkdir -p "$RUNNER_TEMP/agent-commits"
+        git bundle create "$RUNNER_TEMP/agent-commits/commits.bundle" "$START..HEAD"
+    - if: steps.bundle.outputs.commits != '' && steps.bundle.outputs.commits != '0'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ runner.temp }}/agent-commits/commits.bundle
+        if-no-files-found: error
+        retention-days: 1

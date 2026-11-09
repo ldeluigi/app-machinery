@@ -1,10 +1,11 @@
 name: Agent
 description: >-
   Gives a task to an AI agent on the checked-out branch: Claude Code first, the Copilot CLI when Claude can't finish
-  (no credential, a used-up quota, an error) or when `engine` asks for Copilot. The agent commits locally; this action
-  then publishes its commits as the bot App, to `branch`, opening a pull request for a new branch. An agent that
-  finishes without committing answers instead: `response` says why, for the caller to tell the owner. Expects the app
-  checked out (without credentials, or with the bot App's) and the machinery checked out in .machinery.
+  (no credential, a used-up quota, an error) or when `engine` asks for Copilot. The agent commits locally, and this
+  action hands its commits over as a bundle (`artifact`): the job holds the workflow's read-only token and nothing of
+  the bot App's, and a job where no agent ran publishes them (.github/actions/publish-commits). An agent that finishes
+  without committing answers instead: `response` says why, for the caller to tell the owner. Expects the app checked
+  out without credentials, and the machinery checked out in .machinery.
 inputs:
   prompt:
     description: The task
@@ -23,18 +24,9 @@ inputs:
   allowed-bots:
     description: Bots whose events may start Claude (comma-separated logins), on top of Dependabot and GitHub Actions
     default: ""
-  branch:
-    description: The branch the commits go to
+  artifact:
+    description: The name of the artifact that takes the agent's commits to the job that publishes them
     required: true
-  open-pull-request:
-    description: '"true" to open a pull request from `branch` into the default branch'
-    default: "false"
-  labels:
-    description: The pull request's labels
-    default: agent,automerge
-  body:
-    description: The pull request's description
-    default: ""
   claude-code-oauth-token:
     description: CLAUDE_CODE_OAUTH_TOKEN
     default: ""
@@ -44,12 +36,6 @@ inputs:
   copilot-github-token:
     description: COPILOT_GITHUB_TOKEN
     default: ""
-  app-client-id:
-    description: The bot App's client ID
-    required: true
-  app-private-key:
-    description: The bot App's private key
-    required: true
 outputs:
   done:
     description: '"true" when an agent finished'
@@ -66,12 +52,9 @@ outputs:
   out-of-credit:
     description: '"true" when the agents that ran had no quota left'
     value: ${{ steps.claude.outputs.out-of-credit == 'true' && steps.copilot.outputs.done != 'true' && (steps.copilot.outputs.out-of-credit == 'true' || steps.copilot.outputs.error == '') }}
-  pushed:
-    description: '"true" when the agent''s commits were published'
-    value: ${{ steps.publish.outputs.pushed }}
-  pull-request:
-    description: The pull request opened, if any
-    value: ${{ steps.publish.outputs.pull-request }}
+  commits:
+    description: How many commits the agent hands over ("0" or empty when there are none to publish)
+    value: ${{ steps.bundle.outputs.commits }}
 runs:
   using: composite
   steps:
@@ -102,8 +85,6 @@ runs:
         allowed-bots: dependabot[bot],github-actions[bot]${{ inputs.allowed-bots && format(',{0}', inputs.allowed-bots) || '' }}
         claude-code-oauth-token: ${{ inputs.claude-code-oauth-token }}
         anthropic-api-key: ${{ inputs.anthropic-api-key }}
-        app-client-id: ${{ inputs.app-client-id }}
-        app-private-key: ${{ inputs.app-private-key }}
     # Copilot starts from where Claude started, without whatever Claude left half done
     - name: Hand over to Copilot
       if: steps.claude.outputs.done != 'true'
@@ -122,23 +103,9 @@ runs:
         prompt: ${{ inputs.prompt }}
         allowed-commands: ${{ inputs.allowed-commands }}
         copilot-github-token: ${{ inputs.copilot-github-token }}
-    - id: token
+    - id: bundle
       if: steps.claude.outputs.done == 'true' || steps.copilot.outputs.done == 'true'
-      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      uses: ./.machinery/.github/actions/bundle-commits
       with:
-        client-id: ${{ inputs.app-client-id }}
-        private-key: ${{ inputs.app-private-key }}
-        repositories: ${{ github.event.repository.name }}
-        permission-contents: write
-        permission-pull-requests: write
-        permission-issues: write
-    - id: publish
-      if: steps.token.outcome == 'success'
-      uses: ./.machinery/.github/actions/publish-commits
-      with:
-        token: ${{ steps.token.outputs.token }}
-        branch: ${{ inputs.branch }}
         start: ${{ steps.start.outputs.sha }}
-        open-pull-request: ${{ inputs.open-pull-request }}
-        labels: ${{ inputs.labels }}
-        body: ${{ inputs.body }}
+        name: ${{ inputs.artifact }}

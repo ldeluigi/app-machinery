@@ -27,7 +27,10 @@ outputs:
 runs:
   using: composite
   steps:
+    # Read-only: this builds the machinery's tool, whose files aren't the ones the app's cache is keyed on
     - uses: ./.machinery/.github/actions/setup-build
+      with:
+        cache-read-only: "true"
     - id: read
       shell: bash
       env:

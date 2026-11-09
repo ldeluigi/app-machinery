@@ -8,10 +8,12 @@ For changing the machinery, or understanding why it is built this way.
 .github/workflows/        the two reusable workflows the apps call: ci.yml (checks, Android and iOS builds, release,
                           Google Play) and automation.yml (auto-merge, retries, the AI agents, the monthly refresh,
                           the health report); and the machinery's own, self-ci.yml and self-automation.yml
-.github/actions/          setup-build, claude, copilot, agent (Claude, then Copilot), publish-commits, thread (what an
-                          agent may read of an issue or pull request)
+.github/actions/          setup-build, claude, copilot, agent (Claude, then Copilot), thread (what an agent may read
+                          of an issue or pull request), bundle-commits and publish-commits (an agent's commits, from
+                          its job to the one that pushes them)
 .github/scripts/          the scripts the workflows and you run: forbidden names, issue references, health report,
-                          settings, secrets, take-agents-off, out-of-credit, and their tests (test-scripts)
+                          settings, secrets, take-agents-off, out-of-credit, check-agent-commits, wait-for-publish,
+                          and their tests (test-scripts)
 plugins/                  the Gradle convention plugins (machinery.*), published on the machinery's GitHub Pages
 tools/release             the stores' "What's new" (translated by Claude) and the listing's graphics
 tools/bump                the versions Dependabot can't see (JDK, Android SDK, Copilot CLI, Claude Code, actionlint)
@@ -74,6 +76,21 @@ brings them all, tested together. The app's own catalog lists only the libraries
   widen its own powers. For the same reason `publish-commits` refuses commits that change the agents' own settings
   (`.claude/settings.json`, `.mcp.json`, Copilot's `.github/copilot/` and `.github/hooks/`), which can allow any
   command.
+- **The bot's key never shares a runner with an agent**: an agent's commands run the code of the app and of
+  everything it depends on, as the user the runner's own steps run as, so what a job holds, they can reach. Each agent
+  therefore works in a job that holds its model's credential and the workflow token, which there only reads the
+  repository (and its runs): it can't push, post or read an issue. A start job reads the conversation for it. A
+  publish job, on a clean runner with its own checkout of the machinery, takes the agent's commits as a git bundle,
+  fetches them without checking them out, works out by itself what they add to the branch, refuses those that change
+  the agents' settings, and pushes as the bot. What the agent's job says of itself (its answer, whether it finished)
+  is posted, never obeyed. This rests on GitHub giving a job's runner only the secrets that job uses; and whatever
+  the runner gets, the bot's token is no longer used in a workspace an agent touched. The model's credential stays
+  with the agent: it can spend the plan's quota, not touch the repository.
+- **The agents only read the Gradle cache**: an issue or a comment starts their jobs on the default branch's ref,
+  where a job may write the cache that the releases' builds read.
+- **A second request waits for the first one's commits**: jobs queue, not runs, so a request on the same branch could
+  start while the first one's publish job is still on its way. `wait-for-publish` holds the agent until then, and the
+  branch is read again.
 - **The build gets no credentials**: an agent runs `./gradlew`, which runs the code of the app and of everything it
   depends on. Claude Code's subprocess scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) keeps Claude's and the other
   credentials out of the environment of the commands Claude runs, but for the read-only GitHub token that `gh` needs.
@@ -103,7 +120,8 @@ brings them all, tested together. The app's own catalog lists only the libraries
   prompts say never to obey.
 - **Each agent has its own time limit**, shorter than its job's: a job that reaches its limit is cancelled and says
   nothing, while an agent stopped at its own still gets its error posted and its issue handed on. Copilot's is
-  enforced by its action (`timeout`), Claude's by the issue job's step, since a composite action's steps take none.
+  enforced by its action (`timeout`), Claude's by the step of its job, since a composite action's steps take none.
+  A job that ends without a word anyway still gets its answer from its publish job.
 - **Copilot answers in a file**: its output holds every message of its run and its sub-agents' replies, so its action
   asks it to write its answer to `.copilot-answer.md`, kept out of its commits, and posts that; without the file, its
   output without the sub-agents' replies.

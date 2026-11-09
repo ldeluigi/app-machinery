@@ -1,9 +1,13 @@
 name: Publish commits
 description: >-
-  Pushes the commits an AI agent made locally (since `start`) to `branch` as the bot App and, for a new branch, opens
-  the pull request: titled by the first commit's subject (the agents write it to name the whole change), labelled, and
-  with `body`. The bot App token has no Workflows permission, so a commit that touches workflow files is refused; so
-  are, here, commits that change what the agents themselves may do (`protected`), which stays the owner's to change.
+  Pushes the commits an AI agent made to `branch` as the bot App and, for a new branch, opens the pull request: titled
+  by the first commit's subject (the agents write it to name the whole change), labelled, and with `body`. The commits
+  come from the agent's job as a bundle (`artifact`, from .github/actions/bundle-commits): this action runs in a job
+  where no agent and none of its builds ran, fetches them without checking them out, and works out by itself, in a
+  fresh checkout of the branch the agent started from, what they add. The bot App token has no Workflows permission, so
+  a commit that touches workflow files is refused; so are, here, commits that change what the agents themselves may do
+  (`protected`), which stays the owner's to change. Expects that fresh checkout, with all its history, and the
+  machinery checked out in .machinery.
 inputs:
   token:
     description: The bot App's token (contents and pull requests write)
@@ -11,11 +15,13 @@ inputs:
   branch:
     description: The branch to push to
     required: true
-  start:
-    description: The commit the agent started from
+  artifact:
+    description: The artifact that holds the agent's commits
     required: true
   open-pull-request:
-    description: '"true" to open a pull request from the branch into the default branch'
+    description: >-
+      "true" for a new branch of the agent's own, from which a pull request is opened into the default branch; else
+      the branch exists, and the commits must follow it
     default: "false"
   labels:
     description: The pull request's labels, comma-separated (created when missing)
@@ -38,42 +44,41 @@ outputs:
 runs:
   using: composite
   steps:
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ runner.temp }}/agent-commits
     - id: publish
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
         GH_REPO: ${{ github.repository }}
         BRANCH: ${{ inputs.branch }}
-        START: ${{ inputs.start }}
         OPEN: ${{ inputs.open-pull-request }}
         LABELS: ${{ inputs.labels }}
         BODY: ${{ inputs.body }}
         BASE: ${{ github.event.repository.default_branch }}
         PROTECTED: ${{ inputs.protected }}
+        SCRIPTS: ${{ github.action_path }}/../../scripts
       run: |
-        if [ -n "$(git status --porcelain -- . ':!.machinery')" ]; then
-          echo "::warning::The agent left changes it didn't commit, which are lost with this runner:"
-          git status --short -- . ':!.machinery'
-        fi
-        if [ "$(git rev-list --count "$START..HEAD")" -eq 0 ]; then
-          echo "The agent committed nothing."
+        # Fetched, never checked out: nothing the agent's job made runs here, and what that job says of its own commits
+        # isn't taken on trust
+        git -c fetch.fsckObjects=true fetch --quiet --no-tags "$RUNNER_TEMP/agent-commits/commits.bundle" HEAD
+        tip="$(git rev-parse FETCH_HEAD)"
+        kind=existing
+        [ "$OPEN" != "true" ] || kind=new
+        read -ra protected <<< "$PROTECTED"
+        start="$("$SCRIPTS/check-agent-commits.sh" "$tip" "$kind" "${protected[@]}")"
+        if [ -z "$start" ]; then
+          echo "There are no commits to push."
           exit 0
         fi
-        # An agent that could change its own settings could give itself any command, as with the workflows
-        read -ra protected <<< "$PROTECTED"
-        changed=""
-        if [ "${#protected[@]}" -gt 0 ]; then
-          changed="$(git diff --name-only "$START..HEAD" -- "${protected[@]}" | paste -sd ' ' -)"
-        fi
-        if [ -n "$changed" ]; then
-          echo "::error title=Not the agents' to change::The commits change what the agents may do ($changed), which only the owner changes: nothing is pushed."
-          exit 1
-        fi
-        # Without the checkout's hooks, which the agent's commands could have written, and which would run with the token
-        git -c core.hooksPath=/dev/null push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+        # Without the checkout's hooks, which would run with the token
+        git -c core.hooksPath=/dev/null push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$tip:refs/heads/$BRANCH"
         echo "pushed=true" >> "$GITHUB_OUTPUT"
         if [ "$OPEN" = "true" ]; then
-          title="$(git log --reverse --format=%s "$START..HEAD" | head -n 1)"
+          # Not a pipe into head: under pipefail, head ending early fails the step when there are many commits
+          title="$(git log --reverse --format=%s "$start..$tip" | sed -n 1p)"
           args=()
           IFS=',' read -ra names <<< "$LABELS"
           for name in "${names[@]}"; do
