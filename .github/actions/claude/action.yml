@@ -88,6 +88,16 @@ runs:
         if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         fi
+    # Isolated, Claude's commands can't write the checkout's git hooks, which the settings of an app's build write on
+    # every Gradle run (the commit message's check, the formatting's) unless they are there already. So the build
+    # writes them here first: Claude's Gradle runs then find them in place, and they check Claude's commits.
+    - name: Let the build write its git hooks
+      if: steps.auth.outputs.ready == 'true'
+      shell: bash
+      run: |
+        [ -x ./gradlew ] || exit 0
+        ./gradlew help --quiet ||
+          echo "::warning::The build couldn't write its git hooks before Claude started: Claude's Gradle runs may fail on them."
     # Claude Code's arguments but the model, the same for both runs below. The effort is explicit because Opus's own
     # default is only "medium". Editing files is allowed by name too, not only by the permission mode. Claude Code
     # also reads the app's own .claude/settings.json, which can allow more commands: the ones that read issues, pull
