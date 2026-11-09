@@ -21,7 +21,7 @@ robolectric = "4.17"
 # Unicode plural rules for the translation check (build only)
 icu4j = "79.1"
 # The Markdown parser of the agents' threads (tools/thread, the machinery's own)
-commonmark = "0.31.0"
+commonmark = "0.32.0"
 # Android SDK levels: not library versions, bumped by the monthly machinery refresh
 android-compileSdk = "37"
 android-targetSdk = "37"
