@@ -53,7 +53,8 @@ that token's pushes, so a merged update would never be released.
 - [ ] On the App's page: note the **Client ID** (`Iv23…`). Its login is its name plus `[bot]`, e.g. `<owner>-bot[bot]`.
 - [ ] **Generate a private key**: a `.pem` file downloads. Keep it in your password manager. A lost key is no disaster:
       generate a new one, and store it again (docs/04-renewals.md).
-- [ ] **Install App** → `<owner>` → **All repositories** → Install. New apps then get the bot by themselves.
+- [ ] **Install App** → `<owner>` → **All repositories** → Install. New apps then get the bot by themselves. The
+      account's other repositories are left alone: settings go only to the ones whose workflows call the machinery's.
 - [ ] After changing an App's permissions, GitHub asks the installation to accept them: **`<owner>` Settings → GitHub
       Apps → the App → Configure** shows a banner, **Review request → Accept**.
 
@@ -66,8 +67,8 @@ that token's pushes, so a merged update would never be released.
       app's: `.github/scripts/set-secrets.sh <owner>/app-machinery GH_APP_CLIENT_ID GH_APP_LOGIN GH_APP_PRIVATE_KEY
       CLAUDE_CODE_OAUTH_TOKEN COPILOT_GITHUB_TOKEN`.
 - [ ] Apply its settings once by hand: **Actions → Self automation → Run workflow → settings**. From then on it runs
-      monthly, and whenever `settings/` changes, for
-      every repository the bot is installed on.
+      monthly, and whenever `settings/` changes, for the machinery and every app (the repositories the bot is
+      installed on whose workflows call the machinery's).
 
 ## 4. Claude (the main AI agent)
 

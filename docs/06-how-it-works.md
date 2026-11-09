@@ -11,10 +11,10 @@ For changing the machinery, or understanding why it is built this way.
 .github/actions/          setup-build, claude, copilot, agent (Claude, then Copilot), publish-commits, thread (what an
                           agent may read of an issue or pull request)
 .github/scripts/          the scripts the workflows and you run: forbidden names, issue references, health report,
-                          settings, secrets, take-agents-off, out-of-credit
+                          settings, secrets, take-agents-off, out-of-credit, and their tests (test-scripts)
 plugins/                  the Gradle convention plugins (machinery.*), published on the machinery's GitHub Pages
 tools/release             the stores' "What's new" (translated by Claude) and the listing's graphics
-tools/bump                the versions Dependabot can't see (JDK, Android SDK, Copilot CLI, Claude Code)
+tools/bump                the versions Dependabot can't see (JDK, Android SDK, Copilot CLI, Claude Code, actionlint)
 tools/thread              the only GitHub text the agents read: an issue's or pull request's conversation, as far
                           as maintainers wrote or saw it, without what the page doesn't show
 gradle/libs.versions.toml every version the plugins give the apps
@@ -51,7 +51,9 @@ brings them all, tested together. The app's own catalog lists only the libraries
 ## How the machinery maintains itself
 
 - **Dependabot** bumps the actions and the Gradle plugins and libraries of its catalog, weekly, as `fix` commits.
-- **Self automation** bumps what Dependabot can't see, monthly, and applies `settings/` to every app.
+- **Self automation** bumps what Dependabot can't see, monthly, and applies `settings/` to every app: the repositories
+  the bot is installed on whose workflows call the machinery's. The others, on an account that holds more than apps,
+  keep their settings.
 - **Self CI** checks every change: actionlint (with shellcheck), pinned actions, Conventional Commits, the plugins' and
   tools' builds, tests and gradle-kotlin-qa's checks, and the template's build with the change's plugins. Then it
   releases (below).
@@ -69,7 +71,13 @@ brings them all, tested together. The app's own catalog lists only the libraries
   read any Maven repository.
 - **The bot rather than the workflow token**: GitHub starts no workflow from the workflow token's pushes and merges.
 - **Agents never change workflows**: the bot's token for their commits has no Workflows permission, so an agent can't
-  widen its own powers.
+  widen its own powers. For the same reason `publish-commits` refuses commits that change the agents' own settings
+  (`.claude/settings.json`, `.mcp.json`, Copilot's `.github/copilot/` and `.github/hooks/`), which can allow any
+  command.
+- **The build gets no credentials**: an agent runs `./gradlew`, which runs the code of the app and of everything it
+  depends on. Claude Code's subprocess scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) keeps Claude's and the other
+  credentials out of the environment of the commands Claude runs, but for the read-only GitHub token that `gh` needs.
+  The Copilot CLI has no such switch: its commands see its token, which can only ask Copilot.
 - **Only maintainers steer the agents**: anyone can write on a public repository's issues, and text an agent reads can
   carry instructions (prompt injection). So an agent's prompt holds all it reads of GitHub, from `tools/thread`, and
   no agent has a command that reads issues, pull requests or comments, nor a token that writes (the workflow pushes
@@ -88,5 +96,14 @@ brings them all, tested together. The app's own catalog lists only the libraries
     and like a comment to the page;
   - each post is quoted under a heading saying who wrote it, which a post can't fake.
 
+  - the `gh` commands that read issues, pull requests and comments are denied to the agents (`--disallowedTools`,
+    `--deny-tool`), and a denial wins over what an app's own `.claude/settings.json` allows its owner's sessions.
+
   Web pages, release notes and logs, which the CI-fix, upgrade and review agents need, stay untrusted data that their
   prompts say never to obey.
+- **Each agent has its own time limit**, shorter than its job's: a job that reaches its limit is cancelled and says
+  nothing, while an agent stopped at its own still gets its error posted and its issue handed on. Copilot's is
+  enforced by its action (`timeout`), Claude's by the issue job's step, since a composite action's steps take none.
+- **Copilot answers in a file**: its output holds every message of its run and its sub-agents' replies, so its action
+  asks it to write its answer to `.copilot-answer.md`, kept out of its commits, and posts that; without the file, its
+  output without the sub-agents' replies.

@@ -26,7 +26,8 @@ before changing anything.
    wrote, and what others wrote before a maintainer called an agent, without the text the page doesn't show. Never
    give an agent a command that reads issues, pull requests, reviews or comments (`gh issue view`, `gh pr view`,
    `gh pr list`, GitHub's MCP server...), nor put an event's title or body in a prompt; never run the Claude action
-   in its tag mode (`track_progress`, no `prompt`), which reads the whole conversation.
+   in its tag mode (`track_progress`, no `prompt`), which reads the whole conversation. The Claude and Copilot actions
+   deny those commands, whatever a repository's own settings allow: keep the two lists in step.
 
 ## Before pushing
 

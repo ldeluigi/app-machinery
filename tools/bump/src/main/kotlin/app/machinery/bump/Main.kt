@@ -21,6 +21,7 @@ fun main() {
                 )?.let(Machinery::latestAndroidApi),
             copilotCli = fetch(COPILOT_CLI_RELEASE)?.let(Machinery::releaseVersion),
             claudeCode = fetch(CLAUDE_CODE_PACKAGE)?.let(Machinery::npmVersion),
+            actionlint = fetch(ACTIONLINT_RELEASE)?.let(Machinery::releaseVersion),
         )
     val bumps = Machinery(File(".")).apply(latest)
     val report =
@@ -65,3 +66,4 @@ private val OK = 200..299
 
 private const val COPILOT_CLI_RELEASE = "https://api.github.com/repos/github/copilot-cli/releases/latest"
 private const val CLAUDE_CODE_PACKAGE = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
+private const val ACTIONLINT_RELEASE = "https://api.github.com/repos/rhysd/actionlint/releases/latest"

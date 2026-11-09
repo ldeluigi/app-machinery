@@ -4,9 +4,10 @@ description: >-
   (COPILOT_GITHUB_TOKEN), with the model Copilot picks itself (auto). Copilot edits and commits locally and pushes
   nothing: the calling job pushes its commits as the bot App, whose token has no Workflows permission. Copilot reads
   of GitHub only what the prompt holds (callers put what the agent may read of an issue or pull request there, from
-  .github/actions/thread): no command of its own reads issues, pull requests or comments. Without the token it does
-  nothing and "done" stays false. The CLI's version is pinned below; the machinery's monthly refresh moves it.
-  Expects the machinery checked out in .machinery.
+  .github/actions/thread): no command of its own reads issues, pull requests or comments. Its answer is the file it is
+  asked to write, since its output holds its whole run. Past `timeout-minutes` it is stopped, and fails, so that the
+  job's next steps still say so. Without the token it does nothing and "done" stays false. The CLI's version is pinned
+  below; the machinery's monthly refresh moves it. Expects the machinery checked out in .machinery.
 inputs:
   prompt:
     description: What Copilot does
@@ -19,6 +20,11 @@ inputs:
       Shell commands allowed on top of the usual ones, comma-separated, e.g. "gh release view"; never one that reads
       issues, pull requests or comments (AGENTS.md)
     default: ""
+  timeout-minutes:
+    description: >-
+      How long Copilot may work. The job's own limit must leave room for it and for the steps after it: a job that
+      reaches its limit ends without a word
+    default: "60"
   cli-version:
     description: The Copilot CLI release (github/copilot-cli) to run
     default: 1.0.103
@@ -27,7 +33,7 @@ outputs:
     description: '"true" when Copilot ran and finished'
     value: ${{ steps.run.outputs.done == 'true' }}
   response:
-    description: Copilot's last answer, in Markdown
+    description: Copilot's answer, in Markdown, when it finished
     value: ${{ steps.run.outputs.response }}
   error:
     description: Why Copilot couldn't finish, when it ran and failed
@@ -67,7 +73,8 @@ runs:
         echo "$dir" >> "$GITHUB_PATH"
         echo "Copilot CLI $version"
     # The same tools as Claude's (.github/actions/claude), and the caller's commands with the read-only workflow token.
-    # The CLI's GitHub MCP server is off: it would act with COPILOT_GITHUB_TOKEN, a user token, and read anyone's posts.
+    # The CLI's GitHub MCP server is off: it would act with COPILOT_GITHUB_TOKEN, a user token, and read anyone's posts;
+    # the gh commands that read issues, pull requests and comments are denied, whatever else allows them.
     - id: run
       if: steps.auth.outputs.ready == 'true'
       shell: bash
@@ -78,10 +85,17 @@ runs:
         COPILOT_AUTO_UPDATE: "false"
         PROMPT: ${{ inputs.prompt }}
         COMMANDS: ${{ inputs.allowed-commands }}
+        MINUTES: ${{ inputs.timeout-minutes }}
         SCRIPTS: ${{ github.action_path }}/../../scripts
       run: |
         response="$RUNNER_TEMP/copilot-response.md"
         log="$RUNNER_TEMP/copilot-errors.log"
+        # Copilot's output is every message of its run, with its sub-agents' replies: what it does, step by step. Its
+        # answer is this file, which it is asked to write and which stays out of its commits
+        answer=".copilot-answer.md"
+        grep -qxF "$answer" .git/info/exclude 2> /dev/null || echo "$answer" >> .git/info/exclude
+        rm -f "$answer"
+        prompt="$(printf '%s\n\nWhen you have finished, write your final answer to the file `%s` in the repository root, in Markdown: the short summary this task asks you to end with, and nothing else. The workflow posts that file as your answer and keeps it out of your commits: never add it to one.' "$PROMPT" "$answer")"
         status=0
         extra=()
         IFS=',' read -ra commands <<< "$COMMANDS"
@@ -89,7 +103,10 @@ runs:
           command="$(echo "$command" | xargs)"
           [ -n "$command" ] && extra+=(--allow-tool "shell($command:*)")
         done
-        copilot -p "$PROMPT" -s --no-ask-user --trust-folder --model auto --disable-builtin-mcps \
+        timeout --kill-after=60 "${MINUTES}m" \
+          copilot -p "$prompt" -s --no-ask-user --trust-folder --model auto --disable-builtin-mcps \
+          --deny-tool 'shell(gh issue:*)' --deny-tool 'shell(gh pr:*)' --deny-tool 'shell(gh api:*)' \
+          --deny-tool 'shell(gh search:*)' --deny-tool 'shell(gh status:*)' \
           --allow-tool 'write' \
           --allow-tool 'shell(./gradlew:*)' --allow-tool 'shell(.machinery/.github/scripts/check-forbidden-names.sh:*)' \
           --allow-tool 'shell(git status:*)' --allow-tool 'shell(git diff:*)' --allow-tool 'shell(git log:*)' \
@@ -99,16 +116,28 @@ runs:
           --allow-tool 'shell(head:*)' --allow-tool 'shell(tail:*)' "${extra[@]}" \
           > "$response" 2> "$log" || status=$?
         cat "$response"
-        delimiter="EOF-$(openssl rand -hex 8)"
-        printf 'response<<%s\n%s\n%s\n' "$delimiter" "$(head -c 60000 "$response")" "$delimiter" >> "$GITHUB_OUTPUT"
-        if [ "$status" -eq 0 ] && [ -s "$response" ]; then
+        if [ -s "$answer" ]; then
+          text="$(cat "$answer")"
+        else
+          # No answer file: its output, without its sub-agents' replies, whose tags the page takes for HTML
+          text="$(perl -0pe 's{<final_answer>.*?</final_answer>\s*}{}gs' "$response")"
+        fi
+        rm -f "$answer"
+        if [ "$status" -eq 0 ] && [ -n "$text" ]; then
+          delimiter="EOF-$(openssl rand -hex 8)"
+          printf 'response<<%s\n%s\n%s\n' "$delimiter" "${text:0:60000}" "$delimiter" >> "$GITHUB_OUTPUT"
           echo "done=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         cat "$log" >&2
-        # "|| true": under pipefail, a log without any of these words would end the step here, before its outputs
-        reason="$(grep -iE 'error|fail|refus|denied|exceeded|insufficient|quota|credit|[^0-9](401|402|403|429)([^0-9]|$)' "$log" |
-          tail -n 2 | tr '\r\n' '  ' | cut -c1-500 || true)"
+        if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+          # timeout's own exit codes: it stopped Copilot, or killed it for not stopping
+          reason="Copilot ran out of time: it was still working after $MINUTES minutes."
+        else
+          # "|| true": under pipefail, a log without any of these words would end the step here, before its outputs
+          reason="$(grep -iE 'error|fail|refus|denied|exceeded|insufficient|quota|credit|[^0-9](401|402|403|429)([^0-9]|$)' "$log" |
+            tail -n 2 | tr '\r\n' '  ' | cut -c1-500 || true)"
+        fi
         # Not "${reason:-...}": bash reads an apostrophe in that default as an opening quote
         [ -n "$reason" ] || reason="The Copilot CLI stopped (exit code $status) without giving a reason: see this step's log."
         echo "::error title=Copilot couldn't finish::${reason//%/%25}"

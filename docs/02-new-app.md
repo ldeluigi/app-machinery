@@ -27,9 +27,9 @@ package and draws the icon. Commit and push to `main`.
 
 ## 3. Settings and secrets
 
-- [ ] **Settings**: the bot is installed on all of `<owner>`'s repositories, so its monthly run covers the new one. To
-      apply them now: in app-machinery, **Actions → Self automation → Run workflow → settings**. Check: the repository's **Settings →
-      Rules → Rulesets** lists "Default".
+- [ ] **Settings**: the bot is installed on all of `<owner>`'s repositories, so its monthly run covers the new one,
+      whose workflows call the machinery's as the template's do. To apply them now: in app-machinery, **Actions → Self
+      automation → Run workflow → settings**. Check: the repository's **Settings → Rules → Rulesets** lists "Default".
 - [ ] **Secrets**: in a copy of app-machinery, `.github/scripts/set-secrets.sh <owner>/<repo>`, as in
       docs/01-once-per-account.md step 6. Paste the account's values (the bot, the agents, Google Play's two), and the
       app's id and name for `APP_ID` and `APP_NAME`. Press Enter to skip the rest: the next steps ask for them.

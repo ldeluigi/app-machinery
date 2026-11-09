@@ -5,9 +5,11 @@ name: Self automation
 # jobs of its own:
 # - monthly, it bumps the versions Dependabot can't see (the JDK LTS, Android's SDK levels, the Copilot CLI and Claude
 #   Code) in a pull request that merges by itself once Self CI is green, and whose release reaches every app;
-# - monthly, when settings/ changes on main, and by hand, it applies the repository settings of settings/ to every
-#   repository the bot App is installed on (the apps and the machinery). It needs the App's Administration: write
-#   permission (docs/01-once-per-account.md); .github/scripts/apply-settings.sh does the same for one repository.
+# - monthly, when settings/ changes on main, and by hand, it applies the repository settings of settings/ to the
+#   machinery and to every app: the repositories the bot App is installed on whose workflows call the machinery's, and
+#   no other, so that an App installed on a whole account leaves the rest of it alone. It needs the App's
+#   Administration: write permission (docs/01-once-per-account.md); .github/scripts/apply-settings.sh does the same for
+#   one repository.
 
 on:
   pull_request:
@@ -16,7 +18,7 @@ on:
     workflows: [Self CI]
     types: [completed]
   issues:
-    types: [opened, labeled, unlabeled]
+    types: [opened, labeled, unlabeled, unassigned]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -121,7 +123,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Every repository the App is installed on, with the permissions the settings need
+      # Every repository the App is installed on, with the permissions the settings need, and their workflow files to
+      # tell the apps from the rest
       - id: token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -131,16 +134,30 @@ jobs:
           permission-administration: write
           permission-issues: write
           permission-environments: write
+          permission-contents: read
       - name: Apply
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
+          # An app is a repository one of whose workflows calls the machinery's: the settings (merge options, rules,
+          # required checks) would only break a repository that doesn't
+          is_app() { # <owner/repo>
+            local file text
+            for file in $(gh api "repos/$1/contents/.github/workflows" --jq '.[] | select(.type == "file") | .name' 2> /dev/null); do
+              # Read whole, then searched: under pipefail, grep ending the pipe early would count as a failure
+              text="$(gh api "repos/$1/contents/.github/workflows/$file" -H "Accept: application/vnd.github.raw" 2> /dev/null)" || continue
+              if grep -qiE "uses:[[:space:]]*$GITHUB_REPOSITORY/\.github/workflows/" <<< "$text"; then return 0; fi
+            done
+            return 1
+          }
           status=0
           for repo in $(gh api /installation/repositories --paginate --jq '.repositories[] | select(.archived | not) | .full_name'); do
             if [ "$repo" = "$GITHUB_REPOSITORY" ]; then
               .github/scripts/apply-settings.sh "$repo" settings/ruleset-machinery.json || status=1
-            else
+            elif is_app "$repo"; then
               .github/scripts/apply-settings.sh "$repo" || status=1
+            else
+              echo "$repo calls none of the machinery's workflows: its settings stay as they are."
             fi
           done
           exit $status
