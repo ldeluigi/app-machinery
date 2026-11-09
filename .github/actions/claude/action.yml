@@ -1,15 +1,18 @@
 name: Claude
 description: >-
-  Runs Claude Code (Anthropic's Claude Code action) as the bot App, on the owner's Claude subscription
-  (CLAUDE_CODE_OAUTH_TOKEN) or an Anthropic API key, with the best model the plan has (Fable, or else Opus) at
+  Runs Claude Code (Anthropic's Claude Code action) on the owner's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN) or an
+  Anthropic API key, with the best model the plan has (Fable, or else Opus) at
   extra-high effort, and Opus when that model is unavailable or its own usage credit has run out: never a smaller
   model. Without a Claude credential it does nothing and "done" stays false. Claude reads of GitHub only what the
   prompt holds: the action runs in its agent mode, never in its tag mode, which would read an issue's or pull
   request's whole conversation, whoever wrote it (callers put what the agent may read of it in the prompt, from
   .github/actions/thread), and the commands that read them are denied, whatever the app's own Claude settings allow.
   The commands Claude runs, the build among them, get none of the credentials. Claude commits locally and pushes
-  nothing: the caller publishes its commits as the bot App, whose token has no Workflows permission, so Claude can't
-  change workflow files. Expects the app checked out without credentials, and the machinery checked out in .machinery.
+  nothing: its job holds the workflow's read-only token and nothing of the bot App's, and another job, where no agent
+  ran, publishes its commits as the bot App (.github/actions/bundle-commits, then publish-commits), whose token has no
+  Workflows permission, so Claude can't change workflow files. Its builds read the Gradle cache and never write it:
+  the releases' builds read the same one. Expects the app checked out without credentials, and the machinery checked
+  out in .machinery.
 inputs:
   prompt:
     description: What Claude does
@@ -28,12 +31,11 @@ inputs:
   anthropic-api-key:
     description: ANTHROPIC_API_KEY, instead of a subscription
     default: ""
-  app-client-id:
-    description: The bot App's client ID
-    required: true
-  app-private-key:
-    description: The bot App's private key
-    required: true
+  github-token:
+    description: >-
+      The token Claude Code gets: one that only reads the repository, since the commands Claude runs can use it. Never
+      the bot App's, nor one that reads issues or pull requests
+    default: ${{ github.token }}
 outputs:
   done:
     description: '"true" when Claude ran and finished'
@@ -62,18 +64,11 @@ runs:
         else
           echo "::notice::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret, so Claude doesn't run (app-machinery docs/01-once-per-account.md)."
         fi
+    # The cache is read, never written: what an agent's build leaves in it would reach the releases' builds
     - if: steps.auth.outputs.ready == 'true'
       uses: ./.machinery/.github/actions/setup-build
-    # Read-only: Claude pushes and posts nothing, and its Gradle runs execute the build's code, so a write token here
-    # would let an agent steered by what it read push or post anything
-    - id: token
-      if: steps.auth.outputs.ready == 'true'
-      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
-        client-id: ${{ inputs.app-client-id }}
-        private-key: ${{ inputs.app-private-key }}
-        repositories: ${{ github.event.repository.name }}
-        permission-contents: read
+        cache-read-only: "true"
     # Claude Code's arguments but the model, the same for both runs below. The effort is explicit because Opus's own
     # default is only "medium". Claude Code also reads the app's own .claude/settings.json, which can allow more
     # commands: the ones that read issues, pull requests and comments are denied here, and a denial wins over any
@@ -101,7 +96,7 @@ runs:
       with:
         claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
         anthropic_api_key: ${{ inputs.anthropic-api-key }}
-        github_token: ${{ steps.token.outputs.token }}
+        github_token: ${{ inputs.github-token }}
         allowed_bots: ${{ inputs.allowed-bots }}
         # ./gradlew check takes longer than Claude Code's default two-minute limit for a command. Commands never run in
         # the background: a run ends when Claude's turn does, killing a check still running there with the work not
@@ -136,7 +131,7 @@ runs:
       with:
         claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
         anthropic_api_key: ${{ inputs.anthropic-api-key }}
-        github_token: ${{ steps.token.outputs.token }}
+        github_token: ${{ inputs.github-token }}
         allowed_bots: ${{ inputs.allowed-bots }}
         settings: |
           {"env": {"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "2700000",

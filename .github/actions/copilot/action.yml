@@ -2,7 +2,8 @@ name: Copilot
 description: >-
   Runs the GitHub Copilot CLI headless on the checked-out repository, on the owner's Copilot plan
   (COPILOT_GITHUB_TOKEN), with the model Copilot picks itself (auto). Copilot edits and commits locally and pushes
-  nothing: the calling job pushes its commits as the bot App, whose token has no Workflows permission. Copilot reads
+  nothing: another job, where no agent ran, publishes its commits as the bot App (.github/actions/bundle-commits, then
+  publish-commits), whose token has no Workflows permission. Copilot reads
   of GitHub only what the prompt holds (callers put what the agent may read of an issue or pull request there, from
   .github/actions/thread): no command of its own reads issues, pull requests or comments. Its answer is the file it is
   asked to write, since its output holds its whole run. Past `timeout-minutes` it is stopped, and fails, so that the
@@ -55,8 +56,11 @@ runs:
         else
           echo "::notice::No COPILOT_GITHUB_TOKEN secret, so Copilot doesn't run (app-machinery docs/01-once-per-account.md)."
         fi
+    # The cache is read, never written: what an agent's build leaves in it would reach the releases' builds
     - if: steps.auth.outputs.ready == 'true'
       uses: ./.machinery/.github/actions/setup-build
+      with:
+        cache-read-only: "true"
     - name: Install the Copilot CLI
       if: steps.auth.outputs.ready == 'true'
       shell: bash

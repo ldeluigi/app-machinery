@@ -17,13 +17,13 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 | Dependabot's and the bot's pull requests | Automation → automerge | GitHub merges them once CI is green; build-only updates merge as `build(deps)`, which releases nothing |
 | The `ios` label on a pull request | Automation → Build for iOS too | Starts CI on the pull request's branch, with its iOS build |
 | A failed CI run | Automation → Re-run failed jobs once | Network hiccups and lost runners fix themselves |
-| A run that failed twice | Automation → CI-fix agent | An agent fixes it, on the pull request's branch or in a new pull request; after three attempts, `needs-human` and an issue |
-| A new issue, the `claude` label, or `@claude` in a comment, from a maintainer | Automation → Claude | Claude works on it; the bot opens the pull request, which closes the issue and merges by itself once CI is green. A new issue with the `needs-human` or `retry next week` label, or with someone assigned, is left alone |
-| The `copilot` label, `@copilot`, or when Claude can't | Automation → Copilot | The Copilot CLI does the same |
-| A major update merged | Automation → upgrade | An agent adopts what the new version recommends, in a pull request that merges by itself |
+| A run that failed twice | Automation → Triage, Fix, Fix: publish | An agent fixes it, on the pull request's branch or in a new pull request; after three attempts, `needs-human` and an issue |
+| A new issue, the `claude` label, or `@claude` in a comment, from a maintainer | Automation → Claude: start, Claude, Claude: publish | Claude works on it; the bot opens the pull request, which closes the issue and merges by itself once CI is green. A new issue with the `needs-human` or `retry next week` label, or with someone assigned, is left alone |
+| The `copilot` label, `@copilot`, or when Claude can't | Automation → Copilot: start, Copilot, Copilot: publish | The Copilot CLI does the same |
+| A major update merged | Automation → Adopt the new versions, and its publish job | An agent adopts what the new version recommends, in a pull request that merges by itself |
 | Monday 08:30 UTC | Automation → retry-issues | Issues the agents ran out of credit for (`retry next week`) go back to the issue agent |
 | A maintainer takes off an issue's `retry next week` label, or its last assignee | Automation → Retry | The issue goes to the agents, unless it still has the label, an assignee or `needs-human`, or a pull request that closes it is open. Removing the assignee hands over only an issue no agent was called on yet: one they already answered is called again with `@claude ...` or its label |
-| Monthly (1st) | Automation → refresh, review | JDK bump, the machinery's shared agent skills, and a health report (deprecations, credentials about to expire, stuck pull requests) in a pull request; an agent fixes what code can fix, checks Google Play's and Apple's latest policies against the app, and opens one issue for what only you can do |
+| Monthly (1st) | Automation → Refresh and check health, Review, Review: publish | JDK bump, the machinery's shared agent skills, and a health report (deprecations, credentials about to expire, stuck pull requests) in a pull request; an agent fixes what code can fix, checks Google Play's and Apple's latest policies against the app, and opens one issue for what only you can do |
 | Any of the above failing | Automation → Automation health | Recorded in the pinned "Automation health" issue, with its cause |
 | Weekly (Monday) | Dependabot | Updates of the app's libraries, and of the machinery (workflows and plugins) when it released |
 | Monthly (2nd), and when settings change | app-machinery's Self automation → settings | Every app's repository settings, labels, `release` environment and rules, as `settings/` says. An app is a repository whose workflows call the machinery's: the bot's other repositories are left alone |
@@ -51,6 +51,11 @@ They never change workflow files (the bot's token for their commits has no Workf
 settings (`.claude/settings.json`, `.mcp.json`, Copilot's `.github/copilot/` and `.github/hooks/`: such commits aren't
 pushed), never touch what an app's AGENTS.md reserves for you, and never merge anything that isn't green. An agent
 works on an issue for an hour at most: past that it is stopped, and says so.
+
+They never hold the bot's key, nor a token that pushes or posts. An agent works in a job of its own, where its builds
+run, with its model's credential and a token that only reads the repository. So an agent shows as up to three jobs in
+a run: a start job reads the conversation and says the agent is on it; the agent's own job does the work; a publish
+job, where nothing of the agent's runs, checks its commits, pushes them as the bot, opens the pull request and answers.
 
 They only take orders from maintainers (people with write access) and read only what can't trick them. An agent reads
 what maintainers and the bot wrote on an issue or pull request. What anyone else wrote, it reads only as it stood when
