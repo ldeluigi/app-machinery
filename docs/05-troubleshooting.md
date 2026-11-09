@@ -27,6 +27,7 @@ are the ones that land on you, with what to do.
 | A commit is refused by CI: "header must not be longer than 100 characters" | A commit subject over 100 characters (the local hook doesn't count them), or a pull request title that the " (#123)" of squash-merging took past 100 | Before merging: shorten it (a branch can't be force-pushed by the agents: open a new pull request from a rebuilt branch). After: nothing to do, since the next push checks only its own commits. |
 | A release made nothing | Only `build`, `ci`, `docs`, `refactor`, `test` or `chore` commits since the last one | Expected: `feat`, `fix`, `perf` and `revert` release. |
 | "What's new" stayed in English | No Claude token for the release, or the translation failed | The run's warnings say why. The next release translates again. |
+| A scheduled job hasn't run at its hour (the Monday retry of the issues, the monthly refresh, an app's own cron) | GitHub starts scheduled workflows when it has room, which can be hours after their time; nothing in the app or in the machinery delays them | Wait, or start it by hand: **Actions → Automation → Run workflow**, with the task (`retry-issues` or `refresh`). |
 | Settings drifted (a rule changed by hand) | — | **app-machinery → Actions → Self automation → Run workflow → settings** puts `settings/` back. |
 
 When nothing here matches, open an issue in the app: the issue agent reads the logs and either fixes it or says what
