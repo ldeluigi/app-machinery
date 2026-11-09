@@ -6,7 +6,7 @@ import org.jlleitschuh.gradle.ktlint.KtlintExtension
 plugins {
     `kotlin-dsl`
     `maven-publish`
-    alias(libs.plugins.kotlin.qa) apply false
+    alias(libs.plugins.kotlin.qa)
 }
 
 group = "app.machinery"
@@ -122,17 +122,6 @@ publishing {
 // The plugins pass the checks they give the apps (gradle-kotlin-qa, with the machinery's detekt settings on top of its
 // defaults), on their hand-written code only: Gradle's accessors for the precompiled scripts and the catalog above are
 // generated into build/.
-// gradle-kotlin-qa sets itself up once per Kotlin plugin, and kotlin-dsl applies two (Kotlin's JVM plugin and its API
-// plugin): the second time, it stops at registering its extension again, every check being set up by the first. That
-// one error is let through, until gradle-kotlin-qa guards against it.
-runCatching { apply(plugin = "org.danilopianini.gradle-kotlin-qa") }.onFailure { failure ->
-    val setUpTwice =
-        generateSequence(failure) { it.cause }.any {
-            "extension with name 'kotlinQA'" in
-                it.message.orEmpty()
-        }
-    if (!setUpTwice) throw failure
-}
 val generated = layout.buildDirectory.get().asFile
 afterEvaluate {
     tasks.withType<Detekt>().configureEach {
