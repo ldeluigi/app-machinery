@@ -95,7 +95,8 @@ brings them all, tested together. The app's own catalog lists only the libraries
   depends on. Claude Code's subprocess scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) keeps Claude's and the other
   credentials out of the environment of the commands Claude runs, but for the read-only GitHub token that `gh` needs.
   It also runs them among processes of their own, where they can't read the runner's: Claude Code needs `bubblewrap`
-  and `socat` for that, which the Claude action installs, and refuses every command without them.
+  and `socat` for that, which the Claude action installs, and refuses every command without them. There the
+  checkout's git hooks are read-only, so the Claude action lets the build write its hooks before Claude starts.
   The Copilot CLI has no such switch: its commands see its token, which can only ask Copilot.
 - **Only maintainers steer the agents**: anyone can write on a public repository's issues, and text an agent reads can
   carry instructions (prompt injection). So an agent's prompt holds all it reads of GitHub, from `tools/thread`, and
