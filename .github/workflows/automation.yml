@@ -18,7 +18,8 @@ name: Automation
 #   time) hands the issue to the Copilot CLI, which works the same way. An issue the agents ran out of credit for gets
 #   `retry next week`.
 # - An issue kept from the agents goes to them once nothing keeps it: when a maintainer takes its `retry next week`
-#   label off, or its last assignee (the `unassigned` event, which the app's caller must listen to).
+#   label off, or its last assignee (the `unassigned` event, which the app's caller must listen to) if no agent was
+#   called on it yet.
 # - What the agents read of GitHub is in their prompts, from .github/actions/thread (tools/thread): what maintainers and
 #   the bot wrote, and what others wrote before a maintainer last called an agent and haven't edited since, without the
 #   text the page doesn't show. No agent has a command that reads issues, pull requests or comments.
@@ -829,11 +830,15 @@ jobs:
     # off, by hand or on Monday (retry-issues), or its last assignee was removed. While it needs a human, still has the
     # label or still has a person assigned, it goes on waiting. The "claude" label, given again as the bot App, starts
     # the Claude job and, if Claude can't, Copilot.
+    # Removing the assignee only hands over an issue no agent was called on yet (no agent's label, no answer of
+    # theirs): someone who calls an agent and then unassigns themselves would otherwise get the work done twice.
     if: >-
       github.event_name == 'issues' && github.event.issue.state == 'open' &&
       ((github.event.action == 'unlabeled' && github.event.label.name == 'retry next week' &&
         (github.event.sender.type == 'User' || github.event.sender.login == vars.GH_APP_LOGIN)) ||
-       (github.event.action == 'unassigned' && github.event.sender.type == 'User')) &&
+       (github.event.action == 'unassigned' && github.event.sender.type == 'User' &&
+        !contains(github.event.issue.labels.*.name, 'claude') &&
+        !contains(github.event.issue.labels.*.name, 'copilot'))) &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association) &&
       !contains(github.event.issue.labels.*.name, 'needs-human') &&
       !contains(github.event.issue.labels.*.name, 'retry next week') &&
@@ -855,6 +860,7 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           ISSUE: ${{ github.event.issue.number }}
+          ACTION: ${{ github.event.action }}
           SENDER: ${{ github.event.sender.login }}
           BOT: ${{ vars.GH_APP_LOGIN }}
         run: |
@@ -869,6 +875,16 @@ jobs:
                 exit 0
                 ;;
             esac
+          fi
+          # The agents answer as the bot App (Claude from its first minute on an issue): where they did, they are
+          # called again by name, not by removing the assignee
+          if [ "$ACTION" = "unassigned" ]; then
+            answers="$(gh api "repos/$GH_REPO/issues/$ISSUE/comments" --paginate \
+              --jq ".[] | select(.user.login == \"$BOT\") | .id" || true)"
+            if [ -n "$answers" ]; then
+              echo "::notice::The agents already answered on #$ISSUE: comment \"@claude ...\" there, or add its label, to call one again."
+              exit 0
+            fi
           fi
           # A pull request that closes the issue is open already: a second one would do the work twice. GitHub lists the
           # merged ones too, of an issue opened again
