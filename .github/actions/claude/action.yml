@@ -69,10 +69,29 @@ runs:
       uses: ./.machinery/.github/actions/setup-build
       with:
         cache-read-only: "true"
+    # The scrub (below) also runs Claude's commands among processes of their own, where they can't read the runner's:
+    # Claude Code needs bubblewrap and socat for that, and without them refuses every command. The Claude action
+    # installs them only in another of its modes, so they are installed here, the same way.
+    - name: Install what isolates Claude's commands
+      if: steps.auth.outputs.ready == 'true'
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends bubblewrap socat && break
+          if [ "$attempt" -eq 3 ]; then
+            echo "::error::bubblewrap and socat couldn't be installed: Claude's commands wouldn't run."
+            exit 1
+          fi
+          sleep 5
+        done
+        # Ubuntu keeps unprivileged processes from making namespaces, which is how bubblewrap isolates
+        if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        fi
     # Claude Code's arguments but the model, the same for both runs below. The effort is explicit because Opus's own
-    # default is only "medium". Claude Code also reads the app's own .claude/settings.json, which can allow more
-    # commands: the ones that read issues, pull requests and comments are denied here, and a denial wins over any
-    # permission.
+    # default is only "medium". Editing files is allowed by name too, not only by the permission mode. Claude Code
+    # also reads the app's own .claude/settings.json, which can allow more commands: the ones that read issues, pull
+    # requests and comments are denied here, and a denial wins over any permission.
     # The scrub keeps the credentials (Claude's own above all) out of the environment of the commands Claude runs: a
     # build runs the code of the app and of everything it depends on. The Claude action reads the switch from the job's
     # environment.
@@ -82,7 +101,7 @@ runs:
       env:
         ARGS: >-
           --effort xhigh --permission-mode acceptEdits
-          --allowedTools "Bash(./gradlew:*),Bash(.machinery/.github/scripts/check-forbidden-names.sh:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git switch:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(head:*),Bash(tail:*)"
+          --allowedTools "Edit,Write,Bash(./gradlew:*),Bash(.machinery/.github/scripts/check-forbidden-names.sh:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git switch:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(head:*),Bash(tail:*)"
           --disallowedTools "Bash(gh issue:*),Bash(gh pr:*),Bash(gh api:*),Bash(gh search:*),Bash(gh status:*),mcp__github"
           ${{ inputs.allowed-tools && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
       run: |
@@ -138,6 +157,17 @@ runs:
                    "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}}
         claude_args: --model opus ${{ steps.args.outputs.common }}
         prompt: ${{ inputs.prompt }}
+    # A run can end well although Claude was kept from a tool it needed (its sandbox missing, a permission not given):
+    # which tools, never what they were given, so that the run shows it
+    - name: Say which tools Claude was refused
+      if: ${{ !cancelled() && steps.auth.outputs.ready == 'true' }}
+      shell: bash
+      run: |
+        file="$RUNNER_TEMP/claude-execution-output.json"
+        [ -s "$file" ] || exit 0
+        refused="$(jq -r '[.[] | select(.type == "result") | .permission_denials // [] | .[] | .tool_name]
+          | group_by(.) | map("\(.[0]) (\(length))") | join(", ")' "$file" || true)"
+        [ -z "$refused" ] || echo "::warning title=Claude was refused tools::$refused. See Claude's answer for what it couldn't do."
     # Claude's last word, which callers post (a CI fix code can't make, say)
     - id: answer
       if: steps.run.outcome == 'success' || steps.opus.outcome == 'success'
