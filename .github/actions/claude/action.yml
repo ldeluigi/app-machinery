@@ -6,9 +6,10 @@ description: >-
   model. Without a Claude credential it does nothing and "done" stays false. Claude reads of GitHub only what the
   prompt holds: the action runs in its agent mode, never in its tag mode, which would read an issue's or pull
   request's whole conversation, whoever wrote it (callers put what the agent may read of it in the prompt, from
-  .github/actions/thread). Claude commits locally and pushes nothing: the caller publishes its commits as the bot App,
-  whose token has no Workflows permission, so Claude can't change workflow files. Expects the app checked out without
-  credentials, and the machinery checked out in .machinery.
+  .github/actions/thread), and the commands that read them are denied, whatever the app's own Claude settings allow.
+  The commands Claude runs, the build among them, get none of the credentials. Claude commits locally and pushes
+  nothing: the caller publishes its commits as the bot App, whose token has no Workflows permission, so Claude can't
+  change workflow files. Expects the app checked out without credentials, and the machinery checked out in .machinery.
 inputs:
   prompt:
     description: What Claude does
@@ -16,7 +17,7 @@ inputs:
   allowed-tools:
     description: >-
       Tools allowed on top of reading and editing files, Gradle and local git (comma-separated, Claude Code syntax),
-      e.g. Bash(git push:*) or Bash(gh pr comment:*)
+      e.g. Bash(gh release view:*); never one that reads issues, pull requests or comments (AGENTS.md)
     default: ""
   allowed-bots:
     description: Bots whose events may start Claude (comma-separated logins)
@@ -74,7 +75,12 @@ runs:
         repositories: ${{ github.event.repository.name }}
         permission-contents: read
     # Claude Code's arguments but the model, the same for both runs below. The effort is explicit because Opus's own
-    # default is only "medium".
+    # default is only "medium". Claude Code also reads the app's own .claude/settings.json, which can allow more
+    # commands: the ones that read issues, pull requests and comments are denied here, and a denial wins over any
+    # permission.
+    # The scrub keeps the credentials (Claude's own above all) out of the environment of the commands Claude runs: a
+    # build runs the code of the app and of everything it depends on. The Claude action reads the switch from the job's
+    # environment.
     - id: args
       if: steps.auth.outputs.ready == 'true'
       shell: bash
@@ -82,8 +88,11 @@ runs:
         ARGS: >-
           --effort xhigh --permission-mode acceptEdits
           --allowedTools "Bash(./gradlew:*),Bash(.machinery/.github/scripts/check-forbidden-names.sh:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git switch:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(head:*),Bash(tail:*)"
+          --disallowedTools "Bash(gh issue:*),Bash(gh pr:*),Bash(gh api:*),Bash(gh search:*),Bash(gh status:*),mcp__github"
           ${{ inputs.allowed-tools && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
-      run: echo "common=$ARGS" >> "$GITHUB_OUTPUT"
+      run: |
+        echo "common=$ARGS" >> "$GITHUB_OUTPUT"
+        echo "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1" >> "$GITHUB_ENV"
     # A failure is settled below: Opus may take over, and the last step fails the action when no run finished
     - id: run
       if: steps.auth.outputs.ready == 'true'
@@ -141,9 +150,10 @@ runs:
       run: |
         file="$RUNNER_TEMP/claude-execution-output.json"
         [ -s "$file" ] || exit 0
-        text="$(jq -r '([.[] | select(.type == "result")] | last | .result) // ""' "$file" | head -c 60000)"
+        # Cut here, not by a pipe into head: under pipefail, head ending early fails the step on a long answer
+        text="$(jq -r '([.[] | select(.type == "result")] | last | .result) // ""' "$file")"
         delimiter="EOF-$(openssl rand -hex 8)"
-        printf 'text<<%s\n%s\n%s\n' "$delimiter" "$text" "$delimiter" >> "$GITHUB_OUTPUT"
+        printf 'text<<%s\n%s\n%s\n' "$delimiter" "${text:0:60000}" "$delimiter" >> "$GITHUB_OUTPUT"
     # The action's log hides why Claude failed (show_full_output would print every tool result too), but its execution
     # file keeps Claude Code's last word: that reason becomes the run's error, which callers post
     - id: why

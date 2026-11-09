@@ -10,7 +10,9 @@ mkdir -p "$(dirname "$report")"
   echo
   echo "## Gradle deprecations"
   echo
-  ./gradlew help --warning-mode=all 2>&1 | grep -i "deprecat" | sort -u | sed 's/^/- /' || echo "- none"
+  # Without the tokens: the build runs the code of the app and of everything it depends on
+  env -u GH_TOKEN -u GITHUB_TOKEN -u COPILOT_GITHUB_TOKEN ./gradlew help --warning-mode=all 2>&1 |
+    grep -i "deprecat" | sort -u | sed 's/^/- /' || echo "- none"
   echo
   echo "## Credentials"
   echo

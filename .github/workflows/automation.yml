@@ -10,12 +10,15 @@ name: Automation
 #   agent takes it. The triage job keeps count: each attempt on a pull request adds a label, autofix-1 to autofix-3, and a
 #   fourth failure gets `needs-human`, a comment and an issue for the owner. A fix lands on the pull request's branch,
 #   or, on the default branch, in a new pull request that merges by itself.
-# - Issues and comments: Claude takes every issue the owner (or a collaborator) opens without the `needs-human` or
-#   `copilot` label, any issue given the `claude` label, and `@claude ...` in a comment, from maintainers only (write
-#   access). It says it's on it in a comment, which becomes its answer, commits to an `agent/issue-...` branch, and the
-#   bot opens the pull request, which merges by itself once CI is green. The `copilot` label, `@copilot ...`, or Claude
-#   being unable (no credential, usage limit, error) hands the issue to the Copilot CLI, which works the same way. An
-#   issue the agents ran out of credit for gets `retry next week`.
+# - Issues and comments: Claude takes every issue the owner (or a collaborator) opens without the `needs-human`,
+#   `copilot` or `retry next week` label and without a person assigned, any issue given the `claude` label, and
+#   `@claude ...` in a comment, from maintainers only (write access). It says it's on it in a comment, which becomes
+#   its answer, commits to an `agent/issue-...` branch, and the bot opens the pull request, which merges by itself once
+#   CI is green. The `copilot` label, `@copilot ...`, or Claude being unable (no credential, usage limit, error, out of
+#   time) hands the issue to the Copilot CLI, which works the same way. An issue the agents ran out of credit for gets
+#   `retry next week`.
+# - An issue kept from the agents goes to them once nothing keeps it: when a maintainer takes its `retry next week`
+#   label off, or its last assignee (the `unassigned` event, which the app's caller must listen to).
 # - What the agents read of GitHub is in their prompts, from .github/actions/thread (tools/thread): what maintainers and
 #   the bot wrote, and what others wrote before a maintainer last called an agent and haven't edited since, without the
 #   text the page doesn't show. No agent has a command that reads issues, pull requests or comments.
@@ -190,10 +193,12 @@ jobs:
 
   rerun:
     name: Re-run failed jobs once
+    # This repository's branches only: a fork can name its branch as it likes
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.run_attempt == 1 &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
       (github.event.workflow_run.head_branch == github.event.repository.default_branch ||
        startsWith(github.event.workflow_run.head_branch, 'dependabot/') ||
        startsWith(github.event.workflow_run.head_branch, 'machinery/') ||
@@ -405,8 +410,10 @@ jobs:
     name: Claude
     # People with write access only, never bots: the agents' own issues are the ones that need a human. The bot App
     # only hands back an issue the agents had already taken, with the "claude" label (the retry job below).
-    # An issue opened with the "claude" label is left to its "labeled" event, so it isn't taken twice. The association
-    # also counts read-only collaborators and organization members: the thread step checks the caller's access.
+    # An issue opened with the "claude" label is left to its "labeled" event, so it isn't taken twice. One opened with
+    # the "retry next week" label, or assigned to a person, waits: its opener knows the credit is used up, or someone
+    # is on it (the retry job below takes it once the label or the assignee goes). The association also counts
+    # read-only collaborators and organization members: the thread step checks the caller's access.
     if: >-
       (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review') &&
       ((github.event.action == 'labeled' && github.event.label.name == 'claude' &&
@@ -418,7 +425,9 @@ jobs:
           ((github.event.action == 'opened' &&
             !contains(github.event.issue.labels.*.name, 'needs-human') &&
             !contains(github.event.issue.labels.*.name, 'copilot') &&
-            !contains(github.event.issue.labels.*.name, 'claude')) ||
+            !contains(github.event.issue.labels.*.name, 'claude') &&
+            !contains(github.event.issue.labels.*.name, 'retry next week') &&
+            !contains(github.event.issue.assignees.*.type, 'User')) ||
            contains(github.event.comment.body || github.event.review.body, '@claude'))))))
     runs-on: ubuntu-latest
     # The workflow token reads the pull request's branch, the conversation and its writers' access (tools/thread)
@@ -426,7 +435,8 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
-    timeout-minutes: 60
+    # Claude's own limit (an hour, below), and the steps that push and answer after it
+    timeout-minutes: 75
     # Per job, not per workflow: comments that don't call Claude must not cancel a queued request
     concurrency:
       group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
@@ -538,9 +548,11 @@ jobs:
           id="$(gh api "repos/$GH_REPO/issues/$NUMBER/comments" -f body="Claude is working on it, in [this run]($RUN_URL)." --jq .id)"
           echo "id=$id" >> "$GITHUB_OUTPUT"
       # A failure is dealt with below: the issue goes to Copilot, or waits for next week, and the run fails only on
-      # errors other than a used-up quota
+      # errors other than a used-up quota. Out of time counts as a failure: stopped here, the steps below still run,
+      # while the job's own limit would end it without a word
       - id: claude
         continue-on-error: true
+        timeout-minutes: 60
         uses: ./.machinery/.github/actions/claude
         with:
           # The bot App's "claude" label retries an issue
@@ -622,10 +634,15 @@ jobs:
           DONE: ${{ steps.claude.outputs.done }}
           RESPONSE: ${{ steps.claude.outputs.response }}
           WHY: ${{ steps.claude.outputs.error }}
+          # "failure" without a reason: the step was stopped at its time limit, or failed before Claude started
+          STOPPED: ${{ steps.claude.outcome == 'failure' && steps.claude.outputs.error == '' }}
           PULL_REQUEST: ${{ steps.push.outputs.pull-request }}
           PUSHED: ${{ steps.push.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if [ "$STOPPED" = "true" ]; then
+            WHY="it stopped before it finished, out of time (an hour) or before it could start: see the run."
+          fi
           if [ "$DONE" = "true" ]; then
             body="$(printf '%s\n\n— Claude, in [this run](%s)%s' "$RESPONSE" "$RUN_URL" "${PULL_REQUEST:+: $PULL_REQUEST}")"
             if [ "$PUSHED" = "failure" ]; then
@@ -651,6 +668,8 @@ jobs:
           OUT_OF_CREDIT: ${{ steps.claude.outputs.out-of-credit }}
         run: |
           if [ "$COPILOT_READY" = "true" ]; then
+            # Created when missing: on a repository the settings never reached, the handover failed here
+            gh label create copilot --color 444444 --description "GitHub Copilot responsibility" --force
             gh issue edit "$ISSUE" --add-label copilot
           elif [ "$OUT_OF_CREDIT" = "true" ]; then
             .machinery/.github/scripts/take-agents-off.sh "$ISSUE" --retry-next-week
@@ -677,7 +696,8 @@ jobs:
                  github.event.comment.author_association || github.event.review.author_association) &&
         contains(github.event.comment.body || github.event.review.body, '@copilot')))
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Copilot's own limit (an hour, in its action), and the steps that push and answer after it
+    timeout-minutes: 75
     # As Claude's; Copilot's own commands read with the workflow token too
     permissions:
       contents: read
@@ -705,7 +725,7 @@ jobs:
             git switch -c "$BRANCH"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # A failure is dealt with below, as Claude's
+      # A failure is dealt with below, as Claude's, and so is running out of time: the action stops Copilot itself
       - id: copilot
         continue-on-error: true
         uses: ./.machinery/.github/actions/copilot
@@ -805,14 +825,19 @@ jobs:
 
   issue-retry:
     name: Retry
-    # The "retry next week" label came off, by hand or on Monday (retry-issues): unless the issue needs a human, the
-    # "claude" label, given again as the bot App, starts the Claude job and, if Claude can't, Copilot
+    # An open issue that waited goes to the agents once nothing keeps it from them: its "retry next week" label came
+    # off, by hand or on Monday (retry-issues), or its last assignee was removed. While it needs a human, still has the
+    # label or still has a person assigned, it goes on waiting. The "claude" label, given again as the bot App, starts
+    # the Claude job and, if Claude can't, Copilot.
     if: >-
-      github.event_name == 'issues' &&
-      (github.event.action == 'unlabeled' && github.event.label.name == 'retry next week' &&
-       (github.event.sender.type == 'User' || github.event.sender.login == vars.GH_APP_LOGIN) &&
-       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association) &&
-       !contains(github.event.issue.labels.*.name, 'needs-human'))
+      github.event_name == 'issues' && github.event.issue.state == 'open' &&
+      ((github.event.action == 'unlabeled' && github.event.label.name == 'retry next week' &&
+        (github.event.sender.type == 'User' || github.event.sender.login == vars.GH_APP_LOGIN)) ||
+       (github.event.action == 'unassigned' && github.event.sender.type == 'User')) &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association) &&
+      !contains(github.event.issue.labels.*.name, 'needs-human') &&
+      !contains(github.event.issue.labels.*.name, 'retry next week') &&
+      !contains(github.event.issue.assignees.*.type, 'User')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -824,12 +849,40 @@ jobs:
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-issues: write
+          permission-pull-requests: read
       - name: Give the issue to Claude again
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           ISSUE: ${{ github.event.issue.number }}
+          SENDER: ${{ github.event.sender.login }}
+          BOT: ${{ vars.GH_APP_LOGIN }}
         run: |
+          # The bot's label is what calls the agent, so whoever let the issue go must be someone who may call one: a
+          # maintainer (write access; labelling and assigning take less), or the bot App itself on Monday
+          if [ "$SENDER" != "$BOT" ]; then
+            access="$(gh api "repos/$GH_REPO/collaborators/$SENDER/permission" --jq .permission || true)"
+            case "$access" in
+              admin | maintain | write) ;;
+              *)
+                echo "::notice::@$SENDER has no write access to the repository, so #$ISSUE isn't given to the agents."
+                exit 0
+                ;;
+            esac
+          fi
+          # A pull request that closes the issue is open already: a second one would do the work twice. GitHub lists the
+          # merged ones too, of an issue opened again
+          # shellcheck disable=SC2016
+          pulls="$(gh api graphql -f owner="${GH_REPO%%/*}" -f name="${GH_REPO##*/}" -F number="$ISSUE" -f query='
+            query($owner: String!, $name: String!, $number: Int!) {
+              repository(owner: $owner, name: $name) {
+                issue(number: $number) { closedByPullRequestsReferences(first: 20) { nodes { number state } } }
+              }
+            }' --jq '[.data.repository.issue.closedByPullRequestsReferences.nodes[] | select(.state? == "OPEN") | "#\(.number)"] | join(", ")' || true)"
+          if [ -n "$pulls" ]; then
+            echo "::notice::$pulls already closes #$ISSUE: comment \"@claude ...\" there to ask for changes."
+            exit 0
+          fi
           gh api -X DELETE "repos/$GH_REPO/issues/$ISSUE/labels/claude" --silent 2>/dev/null || true
           gh label create claude --color C15F3C --description "Claude agent responsibility" --force
           gh issue edit "$ISSUE" --add-label claude

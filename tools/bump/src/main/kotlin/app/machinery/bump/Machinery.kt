@@ -17,12 +17,13 @@ data class Latest(
     val androidApi: Int?,
     val copilotCli: String? = null,
     val claudeCode: String? = null,
+    val actionlint: String? = null,
 )
 
 /**
  * Applies [latest] to the version files under [root] that it has: `.java-version` (the machinery's and every app's),
- * the Android SDK levels in `gradle/libs.versions.toml`, and the Copilot CLI and Claude Code versions pinned in the
- * machinery's own action and CI workflow. Versions only ever move forward.
+ * the Android SDK levels in `gradle/libs.versions.toml`, and the Copilot CLI, Claude Code and actionlint versions
+ * pinned in the machinery's own action and workflows. Versions only ever move forward.
  */
 class Machinery(
     private val root: File,
@@ -35,6 +36,7 @@ class Machinery(
             bumpCatalog("android-targetSdk", "targetSdk", latest.androidApi),
             bumpPinned(COPILOT_ACTION, "Copilot CLI", COPILOT_PIN, latest.copilotCli),
             bumpPinned(CI_WORKFLOW, "Claude Code", CLAUDE_PIN, latest.claudeCode),
+            bumpPinned(SELF_CI_WORKFLOW, "actionlint", ACTIONLINT_PIN, latest.actionlint),
         )
 
     private fun bumpFile(
@@ -84,12 +86,16 @@ class Machinery(
         private const val CATALOG = "gradle/libs.versions.toml"
         private const val COPILOT_ACTION = ".github/actions/copilot/action.yml"
         private const val CI_WORKFLOW = ".github/workflows/ci.yml"
+        private const val SELF_CI_WORKFLOW = ".github/workflows/self-ci.yml"
 
         /** The Copilot CLI version: the default of the copilot action's `cli-version` input. */
         private val COPILOT_PIN = Regex("""cli-version:[^\n]*\n(?:[^\n]*\n)*?\s*default: (\d+(?:\.\d+)+)""")
 
         /** The Claude Code version the release workflow installs to translate the notes. */
         private val CLAUDE_PIN = Regex("""@anthropic-ai/claude-code@(\d+(?:\.\d+)+)""")
+
+        /** The actionlint release the machinery's own CI checks its workflows with. */
+        private val ACTIONLINT_PIN = Regex("""ACTIONLINT_VERSION: (\d+(?:\.\d+)+)""")
 
         /** Whether version [candidate] is newer than [current] (numeric comparison, `v` prefixes ignored). */
         fun isNewer(

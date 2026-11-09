@@ -2,7 +2,8 @@ name: Publish commits
 description: >-
   Pushes the commits an AI agent made locally (since `start`) to `branch` as the bot App and, for a new branch, opens
   the pull request: titled by the first commit's subject (the agents write it to name the whole change), labelled, and
-  with `body`. The bot App token has no Workflows permission, so a commit that touches workflow files is refused.
+  with `body`. The bot App token has no Workflows permission, so a commit that touches workflow files is refused; so
+  are, here, commits that change what the agents themselves may do (`protected`), which stays the owner's to change.
 inputs:
   token:
     description: The bot App's token (contents and pull requests write)
@@ -22,6 +23,11 @@ inputs:
   body:
     description: The pull request's description
     default: ""
+  protected:
+    description: >-
+      The files and folders the agents' commits may not change, separated by spaces: the settings that decide what
+      Claude Code and the Copilot CLI may run in the repository
+    default: .claude/settings.json .claude/settings.local.json .mcp.json .github/copilot .github/hooks
 outputs:
   pushed:
     description: '"true" when there were commits and they were pushed'
@@ -43,6 +49,7 @@ runs:
         LABELS: ${{ inputs.labels }}
         BODY: ${{ inputs.body }}
         BASE: ${{ github.event.repository.default_branch }}
+        PROTECTED: ${{ inputs.protected }}
       run: |
         if [ -n "$(git status --porcelain -- . ':!.machinery')" ]; then
           echo "::warning::The agent left changes it didn't commit, which are lost with this runner:"
@@ -52,7 +59,18 @@ runs:
           echo "The agent committed nothing."
           exit 0
         fi
-        git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+        # An agent that could change its own settings could give itself any command, as with the workflows
+        read -ra protected <<< "$PROTECTED"
+        changed=""
+        if [ "${#protected[@]}" -gt 0 ]; then
+          changed="$(git diff --name-only "$START..HEAD" -- "${protected[@]}" | paste -sd ' ' -)"
+        fi
+        if [ -n "$changed" ]; then
+          echo "::error title=Not the agents' to change::The commits change what the agents may do ($changed), which only the owner changes: nothing is pushed."
+          exit 1
+        fi
+        # Without the checkout's hooks, which the agent's commands could have written, and which would run with the token
+        git -c core.hooksPath=/dev/null push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
         echo "pushed=true" >> "$GITHUB_OUTPUT"
         if [ "$OPEN" = "true" ]; then
           title="$(git log --reverse --format=%s "$START..HEAD" | head -n 1)"
