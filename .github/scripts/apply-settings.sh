@@ -21,11 +21,19 @@ gh api -X PUT "repos/$repo/automated-security-fixes" --silent
 gh api -X PUT "repos/$repo/environments/release" --silent --input - <<JSON
 {"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
 JSON
-if ! gh api "repos/$repo/environments/release/deployment-branch-policies" \
-  --jq '.branch_policies[].name' | grep -qxF "$default"; then
-  gh api -X POST "repos/$repo/environments/release/deployment-branch-policies" \
-    -f name="$default" -f type=branch --silent
-fi
+# The branch is added without asking which ones are there, and curl doesn't follow the redirect GitHub answers with
+# when it is there already: in a private repository the bot App's token can read neither the list nor the redirect
+answer="$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
+  -H "Authorization: Bearer ${GH_TOKEN:-$(gh auth token)}" -H "Accept: application/vnd.github+json" \
+  --data "{\"name\": \"$default\", \"type\": \"branch\"}" \
+  "https://api.github.com/repos/$repo/environments/release/deployment-branch-policies")"
+case "$answer" in
+  200 | 303) ;;
+  *)
+    echo "::error::The release environment of $repo couldn't be limited to the $default branch (HTTP $answer)."
+    exit 1
+    ;;
+esac
 
 while IFS=$'\t' read -r name color description; do
   [ -n "$name" ] || continue
