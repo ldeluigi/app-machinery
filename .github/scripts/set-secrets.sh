@@ -21,7 +21,7 @@ shift
 
 shared_secrets=" GH_APP_PRIVATE_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY COPILOT_GITHUB_TOKEN "
 release_secrets=" UPLOAD_KEYSTORE_BASE64 UPLOAD_KEYSTORE_PASSWORD UPLOAD_KEY_ALIAS UPLOAD_KEY_PASSWORD PLAY_SERVICE_ACCOUNT_JSON ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY "
-variables=" GH_APP_CLIENT_ID GH_APP_LOGIN APP_ID APP_NAME GCP_WIF_PROVIDER GCP_SERVICE_ACCOUNT PLAY_TRACK APPLE_TEAM_ID IOS_TRACK "
+variables=" GH_APP_CLIENT_ID GH_APP_LOGIN GCP_WIF_PROVIDER GCP_SERVICE_ACCOUNT PLAY_TRACK APPLE_TEAM_ID IOS_TRACK "
 # Asked for as a file (dragged onto the window) or pasted over several lines
 multiline=" GH_APP_PRIVATE_KEY PLAY_SERVICE_ACCOUNT_JSON ASC_PRIVATE_KEY "
 # A binary file, stored as base64
@@ -180,10 +180,6 @@ section="The agents (docs/01-once-per-account.md, steps 4 and 5)"
 question CLAUDE_CODE_OAUTH_TOKEN '^sk-ant-' "the token claude setup-token printed (sk-ant-oat01-...)"
 question ANTHROPIC_API_KEY '^sk-ant-' "an Anthropic API key, only if you use one instead of that token (sk-ant-api...)"
 question COPILOT_GITHUB_TOKEN '^github_pat_' "the fine-grained token for Copilot (github_pat_...)"
-
-section="The app (docs/02-new-app.md, step 3)"
-question APP_ID '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$' "its id, like com.example.myapp"
-question APP_NAME '' "its name, as people see it"
 
 section="The Android upload key (docs/02-new-app.md, step 4)"
 question UPLOAD_KEYSTORE_BASE64 '^[A-Za-z0-9+/=]+$' "the upload.jks file"

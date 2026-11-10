@@ -19,7 +19,7 @@ are the ones that land on you, with what to do.
 | "Resource not accessible by integration" in the bot's steps | The bot lacks a permission (after a machinery change that needs a new one) | The App's settings → Permissions → add it; then accept it on the installation (**`<owner>` Settings → GitHub Apps → Configure → Review request**). |
 | A release went to neither Google Play nor TestFlight | `PLAY_TRACK` (or `APPLE_TEAM_ID`) isn't set on the app | Set it (docs/02-new-app.md, steps 8 and 10a): the next release uploads, and its notes include this one's. |
 | Google Play upload fails with 403 | The service account lacks a permission on the app | Play Console → Users and permissions → `publisher@…` → App permissions (docs/02-new-app.md step 8). |
-| Google Play upload fails with "Package not found" | The app isn't on Play yet, or `APP_ID` is wrong | Do the first upload by hand (docs/02-new-app.md step 7); check the `APP_ID` variable. |
+| Google Play upload fails with "Package not found" | The app isn't on Play yet, or `app.id` is wrong | Do the first upload by hand (docs/02-new-app.md step 7); check `app.id` in the app's `gradle.properties`. |
 | Store listing fails with 403 | No **Manage store presence** for the service account | As above. |
 | "The job was not acquired by Runner" on the iOS job | GitHub's macOS runners were busy | Re-run the job; it isn't a code problem. |
 | The iOS UI test can't find the home screen | The app crashed or was too slow to draw | The run's `ios-screenshots` artifact holds a screen recording (`.mp4`) and the crash report (`.ips`). |

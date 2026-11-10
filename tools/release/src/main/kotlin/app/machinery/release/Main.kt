@@ -10,13 +10,15 @@ import java.io.File
  *
  * From the environment: `RELEASE_NOTES` (its Markdown changelog), `RELEASE_VERSION` and `LAST_RELEASE_VERSION` (empty
  * for the first release); `GITHUB_REPOSITORY`, `GITHUB_API_URL` and `GH_TOKEN` to read the earlier releases (only
- * this one's changes without them); `APP_NAME` and `APP_ABOUT` (what the app is, for the translations), `TRANSLATIONS`
+ * this one's changes without them); `APP_ABOUT` (what the app is, after its name, for the translations), `TRANSLATIONS`
  * (the app's Compose resources, whose `values-*` folders give its languages) and `SCOPE_NOTES` (the app's own
- * maintenance scopes, `scope: line` each). Writes `type` and `priority` to `$GITHUB_OUTPUT` in GitHub Actions: a patch
- * release that only does maintenance gets a lower priority than one that fixes something.
+ * maintenance scopes, `scope: line` each). The app's name and id come from its gradle.properties ([AppIdentity]).
+ * Writes `type`, `priority` and `app-id` to `$GITHUB_OUTPUT` in GitHub Actions: a patch release that only does
+ * maintenance gets a lower priority than one that fixes something, and the upload needs the id.
  */
 fun main() {
-    val name = env("APP_NAME") ?: "The app"
+    val app = AppIdentity.of()
+    val name = app.name
     val scopes = PlayNotes.MAINTENANCE_SCOPES + PlayNotes.scopes(env("SCOPE_NOTES").orEmpty())
     val version =
         checkNotNull(System.getenv("RELEASE_VERSION")?.takeIf { it.isNotBlank() }) { "RELEASE_VERSION is not set" }
@@ -38,7 +40,7 @@ fun main() {
             "notes in ${notes.keys.sorted().joinToString(" ")}:\n${notes.getValue(PlayLanguages.DEFAULT)}",
     )
     System.getenv("GITHUB_OUTPUT")?.let { output ->
-        File(output).appendText("type=${type.name.lowercase()}\npriority=${type.updatePriority}\n")
+        File(output).appendText("type=${type.name.lowercase()}\npriority=${type.updatePriority}\napp-id=${app.id}\n")
     }
 }
 

@@ -31,8 +31,9 @@ package and draws the icon. Commit and push to `main`.
       whose workflows call the machinery's as the template's do. To apply them now: in app-machinery, **Actions → Self
       automation → Run workflow → settings**. Check: the repository's **Settings → Rules → Rulesets** lists "Default".
 - [ ] **Secrets**: in a copy of app-machinery, `.github/scripts/set-secrets.sh <owner>/<repo>`, as in
-      docs/01-once-per-account.md step 6. Paste the account's values (the bot, the agents, Google Play's two), and the
-      app's id and name for `APP_ID` and `APP_NAME`. Press Enter to skip the rest: the next steps ask for them.
+      docs/01-once-per-account.md step 6. Paste the account's values (the bot, the agents, Google Play's two), and
+      press Enter to skip the rest: the next steps ask for them. The app's name and id need no variable: the releases
+      read them from `app.name` and `app.id` in its `gradle.properties`, as the build does.
       Check: the repository's **Settings → Secrets and variables → Actions** lists them under Secrets and Variables,
       and the Dependabot tab lists the agents' and the bot's.
 
