@@ -377,6 +377,8 @@ jobs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
       priority: ${{ steps.play-notes.outputs.priority }}
+      # From app.id in the app's gradle.properties, as the build reads it
+      app-id: ${{ steps.play-notes.outputs.app-id }}
     steps:
       - id: gate
         name: Release only if this is still the newest commit
@@ -472,13 +474,12 @@ jobs:
         if: steps.semantic.outputs.new_release_published == 'true'
         run: ./.machinery/gradlew -p .machinery :tools:release:installDist --quiet
       - id: play-notes
-        name: Google Play notes and update priority
+        name: Google Play notes, update priority and app id
         if: steps.semantic.outputs.new_release_published == 'true'
         env:
           RELEASE_NOTES: ${{ steps.semantic.outputs.new_release_notes }}
           RELEASE_VERSION: ${{ steps.semantic.outputs.new_release_version }}
           LAST_RELEASE_VERSION: ${{ steps.semantic.outputs.last_release_version }}
-          APP_NAME: ${{ vars.APP_NAME || github.event.repository.name }}
           APP_ABOUT: ${{ inputs.about }}
           SCOPE_NOTES: ${{ inputs.scope-notes }}
           TRANSLATIONS: ${{ inputs.translations }}
@@ -544,7 +545,7 @@ jobs:
       - name: Keep the notes in the store listing's languages
         env:
           PLAY_ACCESS_TOKEN: ${{ steps.wif.outputs.access_token || steps.key.outputs.access_token }}
-          PACKAGE: ${{ vars.APP_ID }}
+          PACKAGE: ${{ needs.release.outputs.app-id }}
         run: |
           edits="https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits"
           play() { curl -fsS -H "Authorization: Bearer $PLAY_ACCESS_TOKEN" -H "Content-Type: application/json" "$@"; }
@@ -568,7 +569,7 @@ jobs:
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
         with:
           serviceAccountJson: ${{ steps.wif.outputs.credentials_file_path }}
-          packageName: ${{ vars.APP_ID }}
+          packageName: ${{ needs.release.outputs.app-id }}
           releaseFiles: ${{ env.BUNDLE }}
           mappingFile: ${{ env.MAPPING }}
           whatsNewDirectory: release/whatsnew
@@ -580,7 +581,7 @@ jobs:
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: ${{ vars.APP_ID }}
+          packageName: ${{ needs.release.outputs.app-id }}
           releaseFiles: ${{ env.BUNDLE }}
           mappingFile: ${{ env.MAPPING }}
           whatsNewDirectory: release/whatsnew
@@ -630,7 +631,6 @@ jobs:
         run: ./.machinery/gradlew -p .machinery :tools:release:installDist --quiet
       - name: Replace the graphics that changed
         env:
-          PLAY_PACKAGE_NAME: ${{ vars.APP_ID }}
           PLAY_ACCESS_TOKEN: ${{ steps.wif.outputs.access_token || steps.key.outputs.access_token }}
           ART: ${{ inputs.art-dir }}
         run: .machinery/tools/release/build/install/release/bin/upload-listing "$ART"
