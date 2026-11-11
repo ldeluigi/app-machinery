@@ -184,28 +184,28 @@ class VersionSync(
             listing.group("review.").mapValues { (_, it) -> value(it) } +
                 listOfNotNull(listing.reviewNotes?.let { "notes" to JsonPrimitive(it) })
         val detail = api.get("/v1/appStoreVersions/${version.id}/appStoreReviewDetail")?.resource
-        val attributes =
-            if (detail == null) {
-                api.post(
-                    "/v1/appStoreReviewDetails",
-                    create("appStoreReviewDetails", wanted, mapOf("appStoreVersion" to link(VERSIONS, version.id))),
-                )
-                report.done("App Review information: ${wanted.keys.joinToString()}")
-                JsonObject(wanted)
-            } else {
-                val changed = changes(detail.attributes, wanted)
-                if (changed.isNotEmpty()) {
-                    api.patch(
-                        "/v1/appStoreReviewDetails/${detail.id}",
-                        update("appStoreReviewDetails", detail.id, changed),
-                    )
-                    report.done("App Review information: ${changed.keys.joinToString()}")
-                }
-                JsonObject(detail.attributes + wanted)
-            }
+        val attributes = JsonObject(detail?.attributes.orEmpty() + wanted)
         val missing = CONTACT.filter { attributes.string(it.key).isNullOrBlank() }.values
+        if (detail != null) {
+            val changed = changes(detail.attributes, wanted)
+            if (changed.isNotEmpty()) {
+                api.patch("/v1/appStoreReviewDetails/${detail.id}", update("appStoreReviewDetails", detail.id, changed))
+                report.done("App Review information: ${changed.keys.joinToString()}")
+            }
+        } else if (missing.isEmpty()) {
+            api.post(
+                "/v1/appStoreReviewDetails",
+                create("appStoreReviewDetails", wanted, mapOf("appStoreVersion" to link(VERSIONS, version.id))),
+            )
+            report.done("App Review information: ${wanted.keys.joinToString()}")
+        }
         if (missing.isNotEmpty()) {
-            report.owner("App Review contact (the version page → App Review Information): ${missing.joinToString()}")
+            // App Store Connect makes a version's App Review details only with the whole contact: until the owner
+            // gives it, the notes and the rest wait for the next run.
+            val later = if (detail == null) "; the notes for App Review go in at the next run after it" else ""
+            report.owner(
+                "App Review contact (the version page → App Review Information): ${missing.joinToString()}$later",
+            )
         }
     }
 

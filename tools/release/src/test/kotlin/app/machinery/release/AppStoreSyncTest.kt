@@ -219,7 +219,6 @@ class AppStoreSyncTest :
                     "PATCH /v1/appStoreVersions/V1",
                     "POST /v1/appStoreVersionLocalizations",
                     "PATCH /v1/appStoreVersionLocalizations/L1",
-                    "POST /v1/appStoreReviewDetails",
                     "POST /v1/appScreenshotSets",
                     "POST /v1/appScreenshots",
                     "UPLOAD https://upload.example/1",
@@ -276,6 +275,30 @@ class AppStoreSyncTest :
             summary shouldContain "Copyright"
             summary shouldContain "App Privacy"
             summary shouldNotContain "owner@example.com"
+        }
+
+        test("App Review's details wait for the owner's contact, then get the notes") {
+            val api = FakeAppStore().apply { fresh(screenshot) }
+            val first = run(api)
+            api.writes.filter { "appStoreReviewDetails" in it }.shouldBeEmpty()
+            first.failed shouldBe false
+            first.markdown() shouldContain "the notes for App Review go in at the next run"
+            api.apply {
+                filledIn(screenshot)
+                documents[REVIEW] =
+                    single(
+                        """{"type":"appStoreReviewDetails","id":"R1","attributes":{"contactFirstName":"O",
+                        "contactLastName":"W","contactPhone":"+1 555","contactEmail":null,"notes":null}}""",
+                    )
+                calls.clear()
+            }
+            val next = run(api)
+            api.writes shouldContainExactly listOf("PATCH /v1/appStoreReviewDetails/R1")
+            api
+                .body("PATCH /v1/appStoreReviewDetails/R1")["data"]!!
+                .jsonObject.attributes.keys shouldContainAll
+                setOf("contactEmail", "demoAccountRequired", "notes")
+            next.markdown() shouldNotContain "App Review contact"
         }
 
         test("a record that is up to date gets no change at all") {

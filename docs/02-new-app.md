@@ -231,14 +231,16 @@ What the API can't do, once, in App Store Connect → the app:
       as the privacy policy says (an app that collects nothing: **No**) → Save → **Publish**. The API can neither
       answer nor read this, so the job's report always reminds you of it.
 - [ ] The version page (sidebar, **iOS App** → the version) → **App Review Information**: your first name, last name
-      and phone number (the job fills in the email and the notes). They stay out of the repository.
+      and phone number (with `+` and the country code) → **Save**. They stay out of the repository. App Store
+      Connect keeps no App Review details without them, so the job fills in the email and the notes in its next run.
 - [ ] Same page → **Copyright**: the year and the rights holder, e.g. `2026 Jane Doe`, unless `copyright` is set.
 - [ ] To sell in the European Union, declare whether you're a **trader** under the Digital Services Act: App Store
       Connect → **Business** → **Agreements** → Compliance → Digital Services Act → **Complete Compliance
       Requirements**. A trader's address, phone and
       email show on the EU storefronts; an individual whose app earns nothing usually isn't one. Until then, the
       job's report lists the EU countries as "TRADER_STATUS_NOT_PROVIDED".
-- [ ] Check the job's report: nothing failed, the build is there, nothing else is left for you.
+- [ ] Run the job again (**Actions → CI → Run workflow**, **store-listing** ticked) and check its report: nothing
+      failed, the build is there, nothing else is left for you.
 - [ ] **Add for Review** (top right of the version page) → **Submit to App Review**. Submitting states, on your
       behalf: the content rights answer, the age rating's answers, the App Privacy answers and the build's export
       compliance (`ITSAppUsesNonExemptEncryption` in the app's Info.plist) are true. Review takes a day or two; with
