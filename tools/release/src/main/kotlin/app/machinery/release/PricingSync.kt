@@ -170,12 +170,26 @@ class PricingSync(
                         .map { it to availability.related("territory").orEmpty() }
                 }.groupBy({ it.first }, { it.second })
         reasons.forEach { (reason, where) ->
-            report.owner("Can't be sold in ${where.sorted().joinToString()}: $reason")
+            if (reason == NOT_RELEASED) {
+                report.fact(
+                    "Not on sale in ${where.size} countries and regions: $reason, which App Store Connect shows as " +
+                        "\"Available on App Release\" until the app's first release (after it, Pricing and " +
+                        "Availability tells why)",
+                )
+            } else {
+                report.owner("Can't be sold in ${where.sorted().joinToString()}: $reason")
+            }
         }
     }
 
     private companion object {
         const val PRICE_POINTS = "include=appPricePoint&limit=50"
+
+        /**
+         * The status of every territory before the app's first release (measured: an app record with its first
+         * version prepared), and of a territory where it can't be sold for no more specific reason after it.
+         */
+        const val NOT_RELEASED = "CANNOT_SELL"
 
         /** The statuses of a territory where the app is, or is about to be, on sale. */
         val SELLABLE =

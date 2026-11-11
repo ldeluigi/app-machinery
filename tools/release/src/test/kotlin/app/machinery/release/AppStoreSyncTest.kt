@@ -372,9 +372,17 @@ class AppStoreSyncTest :
                             """{"type":"territoryAvailabilities","id":"T3","attributes":{"available":true,
                             "contentStatuses":["TRADER_STATUS_NOT_PROVIDED"]},
                             "relationships":{"territory":{"data":{"type":"territories","id":"DEU"}}}}""",
+                            """{"type":"territoryAvailabilities","id":"T4","attributes":{"available":true,
+                            "contentStatuses":["CANNOT_SELL"]},
+                            "relationships":{"territory":{"data":{"type":"territories","id":"USA"}}}}""",
                         )
                 }
-            run(api).markdown() shouldContain "Can't be sold in DEU, ITA: TRADER_STATUS_NOT_PROVIDED"
+            val report = run(api).markdown()
+            report shouldContain "Can't be sold in DEU, ITA: TRADER_STATUS_NOT_PROVIDED"
+            // Every territory says so before the first release: a fact, not something for the owner to do
+            val (stands, rest) = report.split("### Filled in by this run")
+            stands shouldContain "Not on sale in 1 countries and regions: CANNOT_SELL"
+            rest shouldNotContain "CANNOT_SELL"
         }
 
         test("a team member who already tests the app joins the group as they are") {
