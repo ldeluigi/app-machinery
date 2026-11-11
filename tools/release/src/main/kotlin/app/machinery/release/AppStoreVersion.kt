@@ -15,8 +15,8 @@ import java.time.Clock
 import java.time.Duration
 
 /**
- * Which build the version being prepared gets: the one of the release [version] once App Store Connect has
- * processed it, waiting up to [wait] for that, or else the newest processed build.
+ * Which build the version being prepared and TestFlight's external testers get: the one of the release [version] once
+ * App Store Connect has processed it, waiting up to [wait] for that, or else the newest processed build.
  */
 data class BuildChoice(
     val version: String?,
@@ -24,13 +24,17 @@ data class BuildChoice(
     val clock: Clock = Clock.systemUTC(),
     val sleep: (Duration) -> Unit = { Thread.sleep(it.toMillis()) },
 ) {
+    /** The builds already picked, by app: whoever asks next gets the same one without waiting again. */
+    private val picked = mutableMapOf<String, Pair<JsonObject, String>?>()
+
     /** The build to put in the version being prepared, with its version, or null when none is processed yet. */
     fun pick(
         api: AppStoreApi,
         app: AppRecord,
     ): Pair<JsonObject, String>? {
+        if (app.id in picked) return picked[app.id]
         val builds = "/v1/builds?filter[app]=${app.id}&filter[preReleaseVersion.platform]=IOS&include=preReleaseVersion"
-        return version?.let { release(api, builds, it) } ?: newest(api, builds)
+        return (version?.let { release(api, builds, it) } ?: newest(api, builds)).also { picked[app.id] = it }
     }
 
     /** The build of the release [version] once processed, waiting for it as long as [wait] allows. */

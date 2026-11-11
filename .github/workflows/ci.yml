@@ -31,8 +31,10 @@ name: CI
 # - App Store listing: the release tool fills in the app's App Store Connect record from the listing the app keeps
 #   (`store/app-store`) and the screenshots StoreArtTest draws: the app information, the age rating's answers, the
 #   price and the countries, the version being prepared (the release's build once processed, the texts in every
-#   language, the notes for App Review, the screenshots) and TestFlight's texts and internal group. It never submits
-#   anything for review. A run started by hand with `store-listing` does it too, on the default branch.
+#   language, the notes for App Review, the screenshots) and TestFlight: its texts, its internal group, and the
+#   external groups the listing names, which get the release's build, its notes as What to Test, and Beta App Review.
+#   It never submits a version to App Review. A run started by hand with `store-listing` does it too, on the default
+#   branch.
 #
 # The app's .github/workflows/ci.yml calls this one: see docs/02-new-app.md.
 
@@ -524,6 +526,14 @@ jobs:
             ${{ inputs.android-app }}/build/outputs/mapping/release/mapping.txt
             whatsnew/
           retention-days: 30
+      # The notes alone, for TestFlight's What to Test
+      - name: Keep the notes for TestFlight
+        if: steps.semantic.outputs.new_release_published == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: whatsnew/
+          retention-days: 30
 
   play:
     name: Upload to Google Play
@@ -796,6 +806,12 @@ jobs:
       - name: Build the release tool
         if: steps.listing.outputs.found == 'true'
         run: ./.machinery/gradlew -p .machinery :tools:release:installDist --quiet
+      - name: The release's notes, for TestFlight's What to Test
+        if: steps.listing.outputs.found == 'true' && needs.testflight.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/release-notes
       - name: Fill in the App Store listing
         if: steps.listing.outputs.found == 'true'
         env:
@@ -805,5 +821,6 @@ jobs:
           # The release whose build the version gets, if this run made one
           RELEASE_VERSION: ${{ needs.testflight.result == 'success' && needs.release.outputs.version || '' }}
           BUILD_WAIT_MINUTES: ${{ inputs.app-store-build-wait }}
+          RELEASE_NOTES_DIR: ${{ needs.testflight.result == 'success' && format('{0}/release-notes', runner.temp) || '' }}
           ART: ${{ inputs.art-dir }}
         run: .machinery/tools/release/build/install/release/bin/app-store "$LISTING" "$ART/app-store"

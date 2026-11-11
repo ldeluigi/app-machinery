@@ -177,7 +177,8 @@ The app keeps its App Store listing in its repository, as it keeps its code: `st
 `app-store-listing` input of the app's `ci.yml` caller names another folder). After every TestFlight upload, and in a
 run started by hand with **store-listing** ticked (**Actions → CI → Run workflow**, on `main`), the **App Store
 listing** job brings the app's App Store Connect record in line with it, with the same API key as the upload. It
-changes only what differs, and never submits anything for review.
+changes only what differs, and never submits a version to App Review (builds for external testers go to Beta App
+Review).
 
 - `app-store.properties`: what isn't written in a language.
   - `primaryCategory`, `primarySubcategoryOne`, `primarySubcategoryTwo`, `secondaryCategory`: Apple's category ids
@@ -195,11 +196,26 @@ changes only what differs, and never submits anything for review.
     `review.demoAccountRequired=false`.
   - `testflight.feedbackEmail`, `testflight.internalGroup` (its name) and `testflight.internalTesterRoles` (e.g.
     `ACCOUNT_HOLDER,ADMIN`).
+  - `testflight.externalGroups`: TestFlight's groups of people outside the team (a public beta, friends...), as ids
+    of your choosing, comma-separated. Each one's settings are `testflight.externalGroup.<id>.<setting>`:
+    - `name`: its name in App Store Connect (the id when missing); the job makes the group if it doesn't exist.
+    - `builds`: `releases` (the default) gets every release's build; `manual` gets only the builds you add in
+      App Store Connect.
+    - `publicLink`: `true` for a link anyone can join with (shown in the job's report), `publicLinkLimit` its most
+      testers (up to 10,000, Apple's limit when missing).
+    - `feedback`: `false` turns off the screenshots and comments testers send from TestFlight.
+
+    The release's build goes to the groups that get every release, with its notes as "What to Test" (after the
+    locale's `what_to_test.txt`, when it has one), and to **Beta App Review**, which external testers need: a day at
+    most, often less, and later builds of an approved version usually pass at once. That review's details are App
+    Review's (`review.<field>`, `review-notes.txt`), unless `testflight.review.<field>` says otherwise; your name and
+    phone go in App Store Connect (step 10c).
 - `review-notes.txt`: the notes for App Review, in English: how to try the app, what it needs.
 - One folder per App Store locale (`en-US`, `de-DE`, `ja`, `zh-Hans`...: Apple's "locale shortcodes"), with
   `name.txt` (30 characters), `subtitle.txt` (30), `description.txt` (4,000), `keywords.txt` (100, comma-separated),
-  `promotional_text.txt` (170) and, for TestFlight, `beta_description.txt`. `{app.name}` stands for `app.name` of
-  `gradle.properties`. A text over Apple's limit stops the job before it changes anything.
+  `promotional_text.txt` (170) and, for TestFlight, `beta_description.txt` and `what_to_test.txt` (4,000 each).
+  `{app.name}` stands for `app.name` of `gradle.properties`. A text over Apple's limit stops the job before it changes
+  anything.
 - The texts serve Google Play's listing too, each locale in Play's language for it (`zh-Hans` in `zh-CN`, `es-MX` in
   `es-419`, `ja` in `ja-JP`...): `name.txt` is the title (30 characters), `promotional_text.txt` (or else
   `subtitle.txt`) the short description (80) and `description.txt` the full one (4,000). A line that starts with
@@ -234,6 +250,9 @@ What the API can't do, once, in App Store Connect → the app:
       and phone number (with `+` and the country code) → **Save**. They stay out of the repository. App Store
       Connect keeps no App Review details without them, so the job fills in the email and the notes in its next run.
 - [ ] Same page → **Copyright**: the year and the rights holder, e.g. `2026 Jane Doe`, unless `copyright` is set.
+- [ ] With external TestFlight groups: **TestFlight** → **Test Information** → **Beta App Review Information**: your
+      first name, last name and phone number → **Save**. Until then, builds wait to be sent to Beta App Review. A
+      beta can come before the first submission: the public link works once Beta App Review lets a build through.
 - [ ] To sell in the European Union, declare whether you're a **trader** under the Digital Services Act: App Store
       Connect → **Business** → **Agreements** → Compliance → Digital Services Act → **Complete Compliance
       Requirements**. A trader's address, phone and

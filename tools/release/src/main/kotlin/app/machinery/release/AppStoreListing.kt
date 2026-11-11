@@ -20,6 +20,9 @@ enum class ListingText(
     KEYWORDS("keywords.txt", KEYWORDS_TEXT),
     PROMOTIONAL_TEXT("promotional_text.txt", PROMOTIONAL_TEXT_LIMIT),
     BETA_DESCRIPTION("beta_description.txt", LONG_TEXT),
+
+    /** What TestFlight's testers should try in every build, before the release's notes ([ExternalTesting]). */
+    WHAT_TO_TEST("what_to_test.txt", LONG_TEXT),
 }
 
 /**
@@ -88,12 +91,15 @@ data class AppStoreListing(
                                 .toMap()
                     }.filterValues { it.isNotEmpty() }
             val notes = dir.text(REVIEW_NOTES, appName)
-            val problems = problems(texts) + listOfNotNull(notes?.let { tooLong(REVIEW_NOTES, it, REVIEW_NOTES_LIMIT) })
+            val listing = AppStoreListing(settings, texts, notes)
+            val problems =
+                problems(texts) + listOfNotNull(notes?.let { tooLong(REVIEW_NOTES, it, REVIEW_NOTES_LIMIT) }) +
+                    ExternalGroup.problems(listing)
             check(problems.isEmpty()) {
                 "The App Store listing in ${dir.path} can't go up:\n" +
                     problems.joinToString("\n")
             }
-            return AppStoreListing(settings, texts, notes)
+            return listing
         }
 
         private fun problems(texts: Map<String, Map<ListingText, String>>): List<String> =

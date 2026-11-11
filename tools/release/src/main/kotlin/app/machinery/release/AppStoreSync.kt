@@ -19,9 +19,10 @@ data class AppRecord(
 
 /**
  * Brings an app's record in App Store Connect in line with its [listing]: the app information, the price and the
- * countries, the version being prepared (its build, texts, App Review notes and [screenshots]) and TestFlight. Every
- * step runs, whatever the others do, and the [report] tells what changed, how things stand, and what's left for the
- * owner. Nothing is ever submitted for review, and no version is released.
+ * countries, the version being prepared (its build, texts, App Review notes and [screenshots]) and TestFlight, whose
+ * external groups get the build with the release's [notes] (by Google Play's language codes). Every step runs,
+ * whatever the others do, and the [report] tells what changed, how things stand, and what's left for the owner. No
+ * version is ever submitted to App Review or released; builds for external testers go to Beta App Review.
  */
 class AppStoreSync(
     private val api: AppStoreApi,
@@ -29,6 +30,7 @@ class AppStoreSync(
     private val screenshots: Map<String, List<java.io.File>>,
     private val builds: BuildChoice,
     private val report: AppStoreReport,
+    private val notes: Map<String, String> = emptyMap(),
 ) {
     /** Runs every step for the app of [bundleId]. */
     fun run(bundleId: String) {
@@ -47,6 +49,7 @@ class AppStoreSync(
         report.step("Availability") { pricing.availability(app) }
         VersionSync(api, listing, localizations, screenshots, builds, report).sync(app)
         TestFlightSync(api, listing, localizations, report).sync(app)
+        ExternalTesting(api, listing, localizations, builds, notes, report).sync(app)
         UNCHECKABLE.forEach(report::owner)
     }
 
