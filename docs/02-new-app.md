@@ -206,7 +206,8 @@ Review).
     - `feedback`: `false` turns off the screenshots and comments testers send from TestFlight.
 
     The release's build goes to the groups that get every release, with its notes as "What to Test" (after the
-    locale's `what_to_test.txt`, when it has one), and to **Beta App Review**, which external testers need: a day at
+    locale's `what_to_test.txt`, when it has one) in TestFlight's languages, those with a `beta_description.txt`,
+    without the emoji and symbols App Store Connect refuses there; and to **Beta App Review**, which external testers need: a day at
     most, often less, and later builds of an approved version usually pass at once. That review's details are App
     Review's (`review.<field>`, `review-notes.txt`), unless `testflight.review.<field>` says otherwise; your name and
     phone go in App Store Connect (step 10c).

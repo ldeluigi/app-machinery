@@ -78,7 +78,8 @@ class TestFlightGroupsTest :
         afterSpec { dir.deleteRecursively() }
         val listing = AppStoreListing.read(groupsIn(dir.resolve("listing")), "Example")
         val app = AppRecord("A1", "en-US", json("{}"))
-        val notes = mapOf("en-US" to "Stars shine brighter.", "de-DE" to "Hellere Sterne.")
+        // As the release writes them for Google Play; German has no TestFlight texts in the listing
+        val notes = mapOf("en-US" to "v1.2.0\n• Stars shine brighter ✨️\n• Fewer ⚠ waits 😀", "de-DE" to "v1.2.0")
 
         fun run(
             api: FakeAppStore,
@@ -100,7 +101,6 @@ class TestFlightGroupsTest :
                     "PATCH /v1/betaGroups/G3",
                     "POST /v1/betaGroups/G2/relationships/builds",
                     "POST /v1/betaBuildLocalizations",
-                    "POST /v1/betaBuildLocalizations",
                     "POST /v1/betaAppReviewSubmissions",
                 )
             val group = api.body("POST /v1/betaGroups")["data"]!!.jsonObject
@@ -114,13 +114,11 @@ class TestFlightGroupsTest :
             val review = api.body("PATCH /v1/betaAppReviewDetails/R1")["data"]!!.jsonObject.attributes
             review["contactEmail"] shouldBe JsonPrimitive("support@example.com")
             review["notes"] shouldBe JsonPrimitive("No account needed.")
-            val texts =
-                api.calls
-                    .filter { it.first == "POST /v1/betaBuildLocalizations" }
-                    .map { it.second!!["data"]!!.jsonObject }
-                    .associate { it.attributes.string("locale") to it.attributes.string("whatToTest") }
-            texts shouldBe
-                mapOf("de-DE" to "Hellere Sterne.", "en-US" to "Play a whole party.\n\nStars shine brighter.")
+            // The API's name for What to Test, in characters App Store Connect takes
+            val english = api.body("POST /v1/betaBuildLocalizations")["data"]!!.jsonObject.attributes
+            english["locale"] shouldBe JsonPrimitive("en-US")
+            english["whatsNew"] shouldBe
+                JsonPrimitive("Play a whole party.\n\nv1.2.0\n- Stars shine brighter\n- Fewer  waits")
             api.body("POST /v1/betaAppReviewSubmissions")["data"]!!.jsonObject.related("build") shouldBe "B1"
             val summary = report.markdown()
             summary shouldContain "TestFlight group \"Public beta\": public link https://testflight.apple.com/join/abc"
@@ -163,7 +161,7 @@ class TestFlightGroupsTest :
                     documents[WHAT_TO_TEST] =
                         document(
                             """{"type":"betaBuildLocalizations","id":"BB1","attributes":{"locale":"en-US",
-                            "whatToTest":"Play a whole party.\n\nStars shine brighter."}}""",
+                            "whatsNew":"Play a whole party.\n\nStars shine brighter."}}""",
                         )
                     documents[BETA_DETAIL] =
                         single(

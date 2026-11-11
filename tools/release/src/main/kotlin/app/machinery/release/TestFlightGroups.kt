@@ -256,12 +256,16 @@ class ExternalTesting(
         }
     }
 
-    /** The build's What to Test, in every language that has the listing's text or the release's notes. */
+    /**
+     * The build's What to Test (the API's `whatsNew`) in TestFlight's languages, those with a `beta_description.txt`:
+     * the listing's text and the release's notes, in characters App Store Connect takes there.
+     */
     private fun whatToTest(build: JsonObject) {
         val texts =
             listing.texts
+                .filterValues { ListingText.BETA_DESCRIPTION in it }
                 .mapValues { (locale, texts) ->
-                    val note = PlayLanguages.ofAppStore(locale)?.let(notes::get)?.trim()
+                    val note = PlayLanguages.ofAppStore(locale)?.let(notes::get)?.let(::testFlightText)
                     listOfNotNull(texts[ListingText.WHAT_TO_TEST], note?.takeIf { it.isNotEmpty() })
                         .let { parts ->
                             parts.joinToString("\n\n").takeIf { it.length <= WHAT_TO_TEST_LIMIT } ?: parts.first()
@@ -274,7 +278,7 @@ class ExternalTesting(
         val wanted =
             texts
                 .filterKeys { it !in kept }
-                .mapValues { (_, text) -> mapOf<String, JsonElement>("whatToTest" to JsonPrimitive(text)) }
+                .mapValues { (_, text) -> mapOf<String, JsonElement>("whatsNew" to JsonPrimitive(text)) }
         if (wanted.isEmpty()) return
         localizations.sync("What to Test", path, "betaBuildLocalizations", "build" to link("builds", build.id), wanted)
     }
@@ -284,6 +288,24 @@ class ExternalTesting(
         const val DETAILS = "betaAppReviewDetails"
         const val READY = "READY_FOR_BETA_SUBMISSION"
         const val WHAT_TO_TEST_LIMIT = 4000
+
+        /** The last character of the Basic Multilingual Plane: App Store Connect refuses any after it (emoji...). */
+        const val LAST_BASIC = 0xFFFF
+
+        /** Characters What to Test refuses: variation selectors, and arrows to dingbats and box drawing. */
+        val REFUSED = listOf(0xFE00..0xFE0F, 0x2190..0x2BFF)
+
+        /** [notes] as What to Test takes them: dashes for the release notes' bullets, without what it refuses. */
+        fun testFlightText(notes: String): String =
+            notes
+                .replace('•', '-')
+                .codePoints()
+                .toArray()
+                .filter { point -> point <= LAST_BASIC && REFUSED.none { point in it } }
+                .joinToString("") { String(Character.toChars(it)) }
+                .lines()
+                .joinToString("\n") { it.trimEnd() }
+                .trim()
 
         /** The contact Beta App Review needs, by attribute: the owner's own, so never in a repository. */
         val CONTACT =
