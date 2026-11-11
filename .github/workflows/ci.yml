@@ -26,6 +26,11 @@ name: CI
 #   started by hand with `store-listing` does only this, on the default branch.
 # - Upload to TestFlight: the iOS app of the release, archived and signed by Apple's cloud signing with the App Store
 #   Connect API key, for the testers (once the `APPLE_TEAM_ID` variable is set).
+# - App Store listing: the release tool fills in the app's App Store Connect record from the listing the app keeps
+#   (`store/app-store`) and the screenshots StoreArtTest draws: the app information, the age rating's answers, the
+#   price and the countries, the version being prepared (the release's build once processed, the texts in every
+#   language, the notes for App Review, the screenshots) and TestFlight's texts and internal group. It never submits
+#   anything for review. A run started by hand with `store-listing` does it too, on the default branch.
 #
 # The app's .github/workflows/ci.yml calls this one: see docs/02-new-app.md.
 
@@ -73,9 +78,19 @@ on:
         type: string
         default: composeApp/build/store-art
       store-listing:
-        description: Only replace the store listing's graphics (a run started by hand on the default branch)
+        description: >-
+          Only bring the store listings up to date: Google Play's graphics and the App Store's listing (a run started
+          by hand on the default branch)
         type: boolean
         default: false
+      app-store-listing:
+        description: The folder of the app's App Store listing (texts by language, settings, notes for App Review)
+        type: string
+        default: store/app-store
+      app-store-build-wait:
+        description: How many minutes the App Store listing waits for App Store Connect to process the release's build
+        type: number
+        default: 30
 
 permissions:
   contents: read
@@ -723,3 +738,57 @@ jobs:
       - name: Remove the API key
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+  app-store:
+    name: App Store listing
+    # After the TestFlight upload, so that the version being prepared gets the release's build once App Store Connect
+    # has processed it; or alone, from a run started by hand on the default branch with `store-listing`. APPLE_TEAM_ID
+    # switches it on, as it does the upload. An app without a listing folder has nothing to fill in.
+    needs: [release, testflight]
+    if: >-
+      !cancelled() && vars.APPLE_TEAM_ID != '' &&
+      (needs.testflight.result == 'success' ||
+       (inputs.store-listing && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
+    runs-on: ubuntu-latest
+    environment: release
+    # The screenshots, then up to app-store-build-wait minutes for the build
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      LISTING: ${{ inputs.app-store-listing }}
+    steps:
+      - *checkout-app
+      - id: listing
+        name: Whether the app keeps an App Store listing
+        run: |
+          if [ -d "$LISTING" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No $LISTING folder: the App Store listing is left as it is (docs/02-new-app.md, step 10b)."
+          fi
+      - *find-machinery
+      - *checkout-machinery
+      - *setup-build
+      - name: Draw the screenshots
+        if: steps.listing.outputs.found == 'true'
+        env:
+          TASKS: ${{ inputs.art }}
+        # Word splitting is wanted: the tasks and options are separate arguments
+        run: |
+          # shellcheck disable=SC2086
+          ./gradlew $TASKS
+      - name: Build the release tool
+        if: steps.listing.outputs.found == 'true'
+        run: ./.machinery/gradlew -p .machinery :tools:release:installDist --quiet
+      - name: Fill in the App Store listing
+        if: steps.listing.outputs.found == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          # The release whose build the version gets, if this run made one
+          RELEASE_VERSION: ${{ needs.testflight.result == 'success' && needs.release.outputs.version || '' }}
+          BUILD_WAIT_MINUTES: ${{ inputs.app-store-build-wait }}
+          ART: ${{ inputs.art-dir }}
+        run: .machinery/tools/release/build/install/release/bin/app-store "$LISTING" "$ART/app-store"

@@ -15,7 +15,8 @@ For changing the machinery, or understanding why it is built this way.
                           settings, secrets, take-agents-off, out-of-credit, check-agent-commits, wait-for-publish,
                           and their tests (test-scripts)
 plugins/                  the Gradle convention plugins (machinery.*), published on the machinery's GitHub Pages
-tools/release             the stores' "What's new" (translated by Claude) and the listing's graphics
+tools/release             the stores' "What's new" (translated by Claude), Google Play's listing graphics and the
+                          App Store listing (bin/app-store, through App Store Connect's API)
 tools/bump                the versions Dependabot can't see (JDK, Android SDK, Copilot CLI, Claude Code, actionlint)
 tools/thread              the only GitHub text the agents read: an issue's or pull request's conversation, as far
                           as maintainers wrote or saw it, without what the page doesn't show

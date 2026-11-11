@@ -4,7 +4,7 @@ Everything that builds, checks, releases and looks after Kotlin Multiplatform ap
 app so that each one keeps almost nothing of its own:
 
 - **Workflows** that the apps call: CI, the iOS build, releases to Google Play with translated "What's new" and to
-  TestFlight, the store listing's graphics, auto-merge, and AI agents (Claude Code, with the Copilot CLI as a fallback)
+  TestFlight, the store listings (Google Play's graphics, the App Store's whole listing), auto-merge, and AI agents (Claude Code, with the Copilot CLI as a fallback)
   that take issues, fix failing builds, adopt major updates and review a monthly refresh.
 - **Gradle plugins** that the apps build with: Kotlin Multiplatform, Compose Multiplatform, the Android app, static
   analysis (detekt, ktlint, copy-paste check), licence checks, translation checks, and the iOS project's settings.

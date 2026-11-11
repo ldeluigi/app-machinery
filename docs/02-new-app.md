@@ -161,14 +161,80 @@ of `docs/01-once-per-account.md` (step 8) first: the Developer Program, the Team
       through Apple's cloud signing (no certificates to keep) and uploads it. App Store Connect takes 10 to 30
       minutes to process it, then emails you.
 - [ ] **Testers**: in App Store Connect → the app → **TestFlight**.
-  - People in your team (up to 100): **Internal Testing → +**, a group, add them. Someone outside the team first needs
-    an App Store Connect account: **Users and Access → +**, their Apple Account email, role **Marketing** (it sees
-    the least), and they accept the email. Internal builds need no review.
+  - People in your team (up to 100): the App Store listing job of 10b makes an internal group with access to every
+    build and invites the team members of `testflight.internalTesterRoles`. To add others by hand: **Internal Testing
+    → +**, a group, add them. Someone outside the team first needs an App Store Connect account: **Users and Access →
+    +**, their Apple Account email, role **Marketing** (it sees the least), and they accept the email. Internal builds
+    need no review.
   - Anyone else (up to 10,000): **External Testing → +**, a group, then **Public Link**. Each version's first build
     goes through Apple's beta review, usually within a day.
   - Testers install **TestFlight** from the App Store on their iPhone and open the invitation.
 
-Submitting to the App Store itself comes with a later machinery release.
+### 10b. The App Store listing
+
+The app keeps its App Store listing in its repository, as it keeps its code: `store/app-store/` (the
+`app-store-listing` input of the app's `ci.yml` caller names another folder). After every TestFlight upload, and in a
+run started by hand with **store-listing** ticked (**Actions → CI → Run workflow**, on `main`), the **App Store
+listing** job brings the app's App Store Connect record in line with it, with the same API key as the upload. It
+changes only what differs, and never submits anything for review.
+
+- `app-store.properties`: what isn't written in a language.
+  - `primaryCategory`, `primarySubcategoryOne`, `primarySubcategoryTwo`, `secondaryCategory`: Apple's category ids
+    (`GAMES`, `GAMES_TRIVIA`, `ENTERTAINMENT`...).
+  - `contentRightsDeclaration`: `USES_THIRD_PARTY_CONTENT` (it shows, plays or links to others' content, and you have
+    the rights) or `DOES_NOT_USE_THIRD_PARTY_CONTENT`.
+  - `supportUrl`, `privacyPolicyUrl`, `marketingUrl` (optional): the same in every language.
+  - `price` in `price.territory` (`USA` by default; `0` is free): every other country gets the same tier.
+  - `availability.newTerritories` (`true` or `false`) and `availability.exclude`: the countries the app is sold in,
+    all but the excluded ones (Apple's three-letter codes, e.g. `CHN`, where games need a licence).
+  - `ageRating.<question>`: the age rating's answers, by the API's names (`profanityOrCrudeHumor=INFREQUENT`,
+    `gambling=false`...). Apple adds questions from time to time: the job's report shows the rating Apple calculated.
+  - `releaseType`: `MANUAL` (you release an approved version yourself) or `AFTER_APPROVAL`.
+  - `review.<field>`: App Review's details other than your own name and phone, e.g. `review.contactEmail` and
+    `review.demoAccountRequired=false`.
+  - `testflight.feedbackEmail`, `testflight.internalGroup` (its name) and `testflight.internalTesterRoles` (e.g.
+    `ACCOUNT_HOLDER,ADMIN`).
+- `review-notes.txt`: the notes for App Review, in English: how to try the app, what it needs.
+- One folder per App Store locale (`en-US`, `de-DE`, `ja`, `zh-Hans`...: Apple's "locale shortcodes"), with
+  `name.txt` (30 characters), `subtitle.txt` (30), `description.txt` (4,000), `keywords.txt` (100, comma-separated),
+  `promotional_text.txt` (170) and, for TestFlight, `beta_description.txt`. `{app.name}` stands for `app.name` of
+  `gradle.properties`. A text over Apple's limit stops the job before it changes anything.
+- The screenshots: StoreArtTest draws them into `composeApp/build/store-art/app-store/<display type>/`, e.g.
+  `APP_IPHONE_67` (6.9-inch iPhone, 1320 × 2868) and `APP_IPAD_PRO_3GEN_129` (13-inch iPad, 2064 × 2752, needed when
+  the app runs on iPads). They go to the primary language, which the other languages show too; a changed picture
+  replaces its whole set.
+
+The version being prepared gets the release's build once App Store Connect has processed it (the job waits up to
+`app-store-build-wait` minutes, 30 by default, then takes the newest processed build), with the build's version
+number. A version in review or on sale can't change: the job then only reports how it stands, and the texts wait for
+the next version.
+
+The job's summary (the run's page) lists what it filled in, how the record stands (the age rating, the version, the
+build, the countries where the app can't be sold yet and why) and what's left for you.
+
+### 10c. The first submission
+
+What the API can't do, once, in App Store Connect → the app:
+
+- [ ] **App Privacy** (sidebar): **Get Started** → "Do you or your third-party partners collect data from this app?"
+      as the privacy policy says (an app that collects nothing: **No**) → Save → **Publish**. The API can neither
+      answer nor read this, so the job's report always reminds you of it.
+- [ ] The version page (sidebar, **iOS App** → the version) → **App Review Information**: your first name, last name
+      and phone number (the job fills in the email and the notes). They stay out of the repository.
+- [ ] Same page → **Copyright**: the year and the rights holder, e.g. `2026 Jane Doe`, unless `copyright` is set.
+- [ ] To sell in the European Union, declare whether you're a **trader** under the Digital Services Act: App Store
+      Connect → **Business** → **Agreements** → Compliance → Digital Services Act → **Complete Compliance
+      Requirements**. A trader's address, phone and
+      email show on the EU storefronts; an individual whose app earns nothing usually isn't one. Until then, the
+      job's report lists the EU countries as "TRADER_STATUS_NOT_PROVIDED".
+- [ ] Check the job's report: nothing failed, the build is there, nothing else is left for you.
+- [ ] **Add for Review** (top right of the version page) → **Submit to App Review**. Submitting states, on your
+      behalf: the content rights answer, the age rating's answers, the App Privacy answers and the build's export
+      compliance (`ITSAppUsesNonExemptEncryption` in the app's Info.plist) are true. Review takes a day or two; with
+      `releaseType=MANUAL`, **Release This Version** once it is approved.
+
+Later versions: each release's build goes to TestFlight; to ship one, **+** next to **iOS App** in the sidebar makes
+a new version (App Store Connect copies the texts), the next App Store listing job fills it in, then 10c's last step.
 
 ## 11. The app's own extras
 

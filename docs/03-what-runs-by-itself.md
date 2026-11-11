@@ -12,7 +12,7 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 | Pushes to `main`, Dependabot's Gradle updates, refreshes | CI → Emulator smoke test | The instrumented tests on an Android emulator |
 | Pushes to `main` touching code, pull requests labelled `ios`, runs by hand | CI → Build and test for iOS | The Kotlin tests on an iOS simulator, the Xcode build, the UI tests, screenshots |
 | Pushes to `main`, once all of the above passed | CI → Version, build and GitHub Release | semantic-release decides the version from the commits; signed bundle; GitHub Release with the changelog; "What's new" from the last releases, translated by Claude into the app's languages |
-| After a release | CI → Upload to Google Play, Google Play listing graphics, Upload to TestFlight | The bundle goes to Play with "What's new" and the in-app update priority (major 5, feature 3, fix 2, maintenance only, like dependency bumps, 1); the listing's icon, feature graphic and screenshots that changed are replaced; the iOS app goes to TestFlight, for its testers |
+| After a release | CI → Upload to Google Play, Google Play listing graphics, Upload to TestFlight, App Store listing | The bundle goes to Play with "What's new" and the in-app update priority (major 5, feature 3, fix 2, maintenance only, like dependency bumps, 1); the listing's icon, feature graphic and screenshots that changed are replaced; the iOS app goes to TestFlight, for its testers; the App Store record takes what changed in the app's `store/app-store` listing and screenshots, and the version being prepared gets the new build (never submitted: docs/02-new-app.md, step 10c) |
 | Every pull request, and its renames | Automation → Pull request title | The title is a Conventional Commit of 100 characters at most, counting the " (#123)" that squash-merging adds (it becomes the commit on `main`) |
 | Dependabot's and the bot's pull requests | Automation → automerge | GitHub merges them once CI is green; build-only updates merge as `build(deps)`, which releases nothing |
 | The `ios` label on a pull request | Automation → Build for iOS too | Starts CI on the pull request's branch, with its iOS build |
@@ -28,7 +28,7 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 | Weekly (Monday) | Dependabot | Updates of the app's libraries, and of the machinery (workflows and plugins) when it released |
 | Monthly (2nd), and when settings change | app-machinery's Self automation → settings | Every app's repository settings, labels, `release` environment and rules, as `settings/` says. An app is a repository whose workflows call the machinery's: the bot's other repositories are left alone |
 
-"Run workflow" on CI builds a branch with iOS, or with "store-listing" only replaces the listing's graphics; on
+"Run workflow" on CI builds a branch with iOS, or with "store-listing" only brings the store listings up to date (Google Play's graphics, the App Store's listing); on
 Automation it starts the refresh, or the retry of the issues, at once.
 
 ## The labels
