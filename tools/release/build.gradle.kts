@@ -1,6 +1,6 @@
 // The stores' "What's new" and in-app update priority for the release semantic-release just made (bin/release), the
-// Google Play listing's graphics (bin/upload-listing) and the App Store listing (bin/app-store). The release workflows
-// run them from installDist; never shipped.
+// Google Play listing's graphics and texts (bin/upload-listing) and the App Store listing (bin/app-store). The release
+// workflows run them from installDist; never shipped.
 plugins {
     id("machinery.kotlin-jvm")
     application
@@ -16,7 +16,8 @@ dependencies {
 }
 
 val uploadListingScripts by tasks.registering(CreateStartScripts::class) {
-    description = "Writes the start scripts of upload-listing, which replaces the Play listing's graphics that changed."
+    description =
+        "Writes the start scripts of upload-listing, which replaces the Play listing's graphics and texts that changed."
     mainClass = "app.machinery.release.UploadListingKt"
     applicationName = "upload-listing"
     outputDir =

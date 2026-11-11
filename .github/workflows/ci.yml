@@ -22,8 +22,10 @@ name: CI
 #   older run that sees newer commits leaves the release to theirs.
 # - Upload to Google Play, with the notes in the store listing's languages and the in-app update priority (once the
 #   `PLAY_TRACK` variable is set);
-# - Google Play listing graphics: the app's StoreArtTest draws them, and the ones that changed are replaced. A run
-#   started by hand with `store-listing` does only this, on the default branch.
+# - Google Play listing: the app's StoreArtTest draws the graphics, and the ones that changed are replaced; the texts,
+#   in every language, come from the App Store listing's folder and the Google Play one, and the languages that changed
+#   are written. A run started by hand with `store-listing` does only this and the App Store listing, on the default
+#   branch.
 # - Upload to TestFlight: the iOS app of the release, archived and signed by Apple's cloud signing with the App Store
 #   Connect API key, for the testers (once the `APPLE_TEAM_ID` variable is set).
 # - App Store listing: the release tool fills in the app's App Store Connect record from the listing the app keeps
@@ -79,14 +81,22 @@ on:
         default: composeApp/build/store-art
       store-listing:
         description: >-
-          Only bring the store listings up to date: Google Play's graphics and the App Store's listing (a run started
-          by hand on the default branch)
+          Only bring the store listings up to date: Google Play's graphics and texts, and the App Store's listing (a
+          run started by hand on the default branch)
         type: boolean
         default: false
       app-store-listing:
-        description: The folder of the app's App Store listing (texts by language, settings, notes for App Review)
+        description: >-
+          The folder of the app's App Store listing (texts by language, settings, notes for App Review), whose texts
+          serve Google Play's listing too
         type: string
         default: store/app-store
+      google-play-listing:
+        description: >-
+          The folder of what the app's Google Play listing has of its own: texts by Play's language codes, for the
+          languages the App Store lacks or the texts that differ
+        type: string
+        default: store/google-play
       app-store-build-wait:
         description: How many minutes the App Store listing waits for App Store Connect to process the release's build
         type: number
@@ -605,7 +615,7 @@ jobs:
           inAppUpdatePriority: ${{ needs.release.outputs.priority }}
 
   listing:
-    name: Google Play listing graphics
+    name: Google Play listing
     # After the upload, which commits its own edit of the app: one edit at a time. Or alone, from a run started by
     # hand on the default branch with `store-listing`.
     needs: play
@@ -644,11 +654,16 @@ jobs:
       - *google-key
       - name: Build the release tool
         run: ./.machinery/gradlew -p .machinery :tools:release:installDist --quiet
-      - name: Replace the graphics that changed
+      # The texts come from the App Store listing's folder and the Google Play one (PlayListing); an app with neither
+      # keeps the texts it has on Play
+      - name: Replace the graphics and texts that changed
         env:
           PLAY_ACCESS_TOKEN: ${{ steps.wif.outputs.access_token || steps.key.outputs.access_token }}
           ART: ${{ inputs.art-dir }}
-        run: .machinery/tools/release/build/install/release/bin/upload-listing "$ART"
+          APP_STORE_LISTING: ${{ inputs.app-store-listing }}
+          GOOGLE_PLAY_LISTING: ${{ inputs.google-play-listing }}
+        run: |
+          .machinery/tools/release/build/install/release/bin/upload-listing "$ART" "$APP_STORE_LISTING"             "$GOOGLE_PLAY_LISTING"
 
   testflight:
     name: Upload to TestFlight

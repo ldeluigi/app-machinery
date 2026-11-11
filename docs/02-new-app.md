@@ -127,8 +127,9 @@ Google's API can't create an app, so the first bundle goes up by hand.
       **Manage store presence**. Apply.
 - [ ] Turn the uploads on: `.github/scripts/set-secrets.sh <owner>/<repo> PLAY_TRACK`, and answer `internal`. Every
       release after this goes to Play by itself, with "What's new" and the update priority.
-- [ ] Replace the listing's graphics with the app's own once: **Actions → CI → Run workflow**, on `main`, with
-      **store-listing** ticked.
+- [ ] Replace the listing's graphics and texts with the app's own once: **Actions → CI → Run workflow**, on `main`,
+      with **store-listing** ticked. The texts come from the app's store folders (step 10b): an app without them keeps
+      the texts it has on Play.
 
 ## 9. Launch to production
 
@@ -199,6 +200,16 @@ changes only what differs, and never submits anything for review.
   `name.txt` (30 characters), `subtitle.txt` (30), `description.txt` (4,000), `keywords.txt` (100, comma-separated),
   `promotional_text.txt` (170) and, for TestFlight, `beta_description.txt`. `{app.name}` stands for `app.name` of
   `gradle.properties`. A text over Apple's limit stops the job before it changes anything.
+- The texts serve Google Play's listing too, each locale in Play's language for it (`zh-Hans` in `zh-CN`, `es-MX` in
+  `es-419`, `ja` in `ja-JP`...): `name.txt` is the title (30 characters), `promotional_text.txt` (or else
+  `subtitle.txt`) the short description (80) and `description.txt` the full one (4,000). A line that starts with
+  `[app-store]` goes to the App Store alone, one that starts with `[google-play]` to Google Play alone. `store/google-play/`
+  (the `google-play-listing` input) adds what Play has of its own, in folders named by Play's codes (`bg`, `de-DE`...):
+  a language the App Store lacks, or a text that differs, as `title.txt`, `short_description.txt` and
+  `full_description.txt` (a language with no title gets the app's name). The **Google Play listing** job writes the
+  languages whose texts changed, after every Play upload and in a **store-listing** run, and leaves Play's other
+  languages as they are. Google Play takes "What's new" only in the listing's languages, so every language here also
+  gets the release notes in its own words.
 - The screenshots: StoreArtTest draws them into `composeApp/build/store-art/app-store/<display type>/`, e.g.
   `APP_IPHONE_67` (6.9-inch iPhone, 1320 × 2868) and `APP_IPAD_PRO_3GEN_129` (13-inch iPad, 2064 × 2752, needed when
   the app runs on iPads). They go to the primary language, which the other languages show too; a changed picture

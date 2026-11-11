@@ -29,7 +29,9 @@ enum class ListingText(
  * - `review-notes.txt`: the notes for App Review;
  * - one folder per App Store locale (`en-US`, `de-DE`, `ja`...) with the [ListingText] files it has.
  *
- * `{app.name}` in any of them stands for the app's name, read from its gradle.properties ([AppIdentity]).
+ * `{app.name}` in any of them stands for the app's name, read from its gradle.properties ([AppIdentity]). The texts
+ * serve Google Play too ([PlayListing]): a line that starts with `[google-play]` is left out here, and `[app-store]`
+ * is taken off the lines that are the App Store's alone ([Store]).
  */
 data class AppStoreListing(
     val settings: Map<String, String>,
@@ -123,6 +125,7 @@ data class AppStoreListing(
                 .takeIf { it.isFile }
                 ?.readText(Charsets.UTF_8)
                 ?.replace("\r\n", "\n")
+                ?.let(Store.APP_STORE::lines)
                 ?.trim()
                 ?.replace(NAME, appName)
                 ?.takeIf { it.isNotEmpty() }

@@ -57,6 +57,25 @@ object PlayLanguages {
     }
 
     /**
+     * Play's store listing language for an App Store locale (`de-DE`, `ja`, `ar-SA`, `zh-Hans`...), or null when Play
+     * has none: the same code when Play has it, else the language without a region (`ar`), else the language's only
+     * listing (`ja-JP`).
+     */
+    fun ofAppStore(locale: String): String? {
+        APP_STORE_LOCALES[locale]?.let { return it }
+        val language = locale.substringBefore('-').let { PLAY_LANGUAGE[it] ?: it }
+        val listings = CODES.filter { it == language || it.startsWith("$language-") }
+        return when {
+            locale in CODES -> locale
+            language in listings -> language
+            else -> listings.singleOrNull()
+        }
+    }
+
+    /** App Store locales that name a script or a wider region than Play's listing does. */
+    private val APP_STORE_LOCALES = mapOf("es-MX" to "es-419", "zh-Hans" to "zh-CN", "zh-Hant" to "zh-TW")
+
+    /**
      * The BCP 47 tag of a resource qualifier that is only a language (`de`, `zh-rTW`, `b+sr+Latn`), or null for any
      * other qualifier (`night`, `de-land`).
      */
