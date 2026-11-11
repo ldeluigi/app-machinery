@@ -185,15 +185,15 @@ class AppInfoSync(
 
     private fun categories(info: JsonObject) {
         val wanted = CATEGORIES.mapNotNull { name -> listing.setting(name)?.let { name to it } }.toMap()
-        val changed = wanted.filter { (name, category) -> info.related(name) != category }
-        if (changed.isEmpty()) return
+        if (wanted.all { (name, category) -> info.related(name) == category }) return
+        // All of them, even those that stay: a subcategory goes with its category
         api.patch(
             "/v1/appInfos/${info.id}",
             update(
                 "appInfos",
                 info.id,
                 relationships =
-                    changed.mapValues { (_, category) ->
+                    wanted.mapValues { (_, category) ->
                         link("appCategories", category)
                     },
             ),
