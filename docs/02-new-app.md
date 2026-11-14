@@ -317,8 +317,12 @@ Google Play Games, once:
       client for the package name and the SHA-1 of the app signing key, from **Test and release → App integrity**).
 - [ ] Put the project's id into the ids file (`game_services_project_id`) and commit it. Until then the job only
       reminds you of it.
-- [ ] **Users and permissions** → the service account of step 8 → the app: give it the Play Games Services
-      permissions. Without them the job fails with 403.
+- [ ] **Users and permissions** (the developer account's page, above the apps) → the service account of step 8 →
+      **Account permissions**: **Edit Play Games Services projects**. Play has these for the whole account only, not
+      per app; publishing stays yours. Without it the job fails with 403.
+- [ ] Enable the Games Configuration API in the service account's Cloud project:
+      `gcloud services enable gamesconfiguration.googleapis.com --project <its project>`. Without it the job fails
+      with 403, "has not been used in project ... or it is disabled".
 - [ ] After the job made the achievements: commit the ids file from the run's summary; give each new achievement its
       icon (**Play Games Services → Achievements**, from StoreArtTest's pictures: the API can't upload them); add your
       account under **Testers**; then **Publish** (**Setup and management → Publishing**): the API can't either. The
