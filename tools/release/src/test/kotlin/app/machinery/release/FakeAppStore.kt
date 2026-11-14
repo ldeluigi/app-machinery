@@ -19,6 +19,9 @@ class FakeAppStore : AppStoreApi {
     /** The calls that fail, as "METHOD path". */
     val failing = mutableSetOf<String>()
 
+    /** The calls App Store Connect answers with an error, as "METHOD path", and the error's message. */
+    val errors = mutableMapOf<String, String>()
+
     /** The parts uploaded, by URL. */
     val uploads = mutableMapOf<String, ByteArray>()
 
@@ -63,6 +66,7 @@ class FakeAppStore : AppStoreApi {
     ) {
         calls += call to body
         check(call !in failing) { "App Store Connect answered 409 to $call" }
+        errors[call]?.let { throw java.io.IOException(it) }
     }
 }
 

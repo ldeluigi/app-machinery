@@ -274,3 +274,61 @@ a new version (App Store Connect copies the texts), the next App Store listing j
 An app's own scheduled jobs (a data refresh, say) stay in its repository; store their secrets by name, like
 `.github/scripts/set-secrets.sh <owner>/<repo> YOUTUBE_API_KEY`. Keep the app's maintenance scope in mind for the release notes: the app's `ci.yml` caller passes
 `scope-notes`, e.g. `catalog: Refreshed the song catalogue.`, so that its commits read as one friendly line.
+
+## 12. A game's achievements
+
+A game lists its achievements in `store/achievements.txt` (the `achievements` input of its `ci.yml` caller names
+another file). After every release, and in a run with **store-listing**, the Google Play listing job makes and updates
+them in Google Play Games, and the App Store listing job in Game Center: their texts in every language the app speaks,
+from its string resources, their points, whether they're hidden until unlocked, and in Game Center their pictures.
+What a store has and matches stays; nothing is ever deleted. `bin/achievements check` (tools/release) checks the list
+without the stores.
+
+```
+# The string keys of each achievement's name and description, {id} being its id
+name = achievement_{id}
+description = achievement_{id}_description
+# Where the texts, Game Center's pictures and Play Games' ids are: these are the defaults
+strings = composeApp/src/commonMain/composeResources
+pictures = composeApp/build/store-art/achievements/game-center
+play-games-ids = composeApp/src/androidMain/res/values/games-ids.xml
+
+first_game 5
+streak_10 10
+a_joke 10 secret
+```
+
+- One achievement a line, in the order the services list them: its id (lower case letters, digits and `_`, never
+  renamed: it is Game Center's id and names Play's), its points (0 to 100, in steps of 5, 1,000 at most in all) and
+  `secret` for one hidden until unlocked.
+- The default texts (`values/`) are in `app.locale`'s language; every achievement needs both there. Each other
+  `values-*` folder with both is a language: the stores' languages it covers get it, the closest first (`pt-rPT`
+  before `pt`). A language a store lacks is left out.
+- The pictures: `<id>.png`, 512 or 1024 pixels square. StoreArtTest draws them like the store art.
+- Play Games' ids: Play makes an id for each achievement it creates, and the app reads them from an Android resource
+  file, `game_services_project_id` for the game's project and `achievement_<id>` for each achievement. The job writes
+  the new ones into the run's summary, as the whole file: commit it. A run whose new ids weren't committed yet finds
+  the achievements by their English name, and makes none twice.
+
+Google Play Games, once:
+
+- [ ] Play Console → the app → **Grow users → Play Games Services → Setup and management → Configuration**: create the
+      game's games services project ("No, my game doesn't use Google APIs") and its Android credential (an OAuth
+      client for the package name and the SHA-1 of the app signing key, from **Test and release → App integrity**).
+- [ ] Put the project's id into the ids file (`game_services_project_id`) and commit it. Until then the job only
+      reminds you of it.
+- [ ] **Users and permissions** → the service account of step 8 → the app: give it the Play Games Services
+      permissions. Without them the job fails with 403.
+- [ ] After the job made the achievements: commit the ids file from the run's summary; give each new achievement its
+      icon (**Play Games Services → Achievements**, from StoreArtTest's pictures: the API can't upload them); add your
+      account under **Testers**; then **Publish** (**Setup and management → Publishing**): the API can't either. The
+      job's report reminds you whenever there is something to publish.
+
+Game Center: nothing before. The job switches Game Center on for the app and makes the achievements with their texts
+and pictures; App Store Connect takes some 3,600 requests an hour, so a first run of many achievements in many
+languages may stop there and leave the rest to the next run (its report says so). Then:
+
+- [ ] The version that brings them: its page → **Game Center** → add the achievements. They go live with it.
+- [ ] The iOS app asks for Game Center in its entitlements file. On the first TestFlight build, check that the game
+      signs in to Game Center: the upload archives the app unsigned (10a), and Apple's cloud signing may leave the
+      entitlement out.

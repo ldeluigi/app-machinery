@@ -1,6 +1,7 @@
 // The stores' "What's new" and in-app update priority for the release semantic-release just made (bin/release), the
-// Google Play listing's graphics and texts (bin/upload-listing) and the App Store listing (bin/app-store). The release
-// workflows run them from installDist; never shipped.
+// Google Play listing's graphics and texts (bin/upload-listing), the App Store listing (bin/app-store) and a game's
+// achievements in Google Play Games and Game Center (bin/achievements). The release workflows run them from
+// installDist; never shipped.
 plugins {
     id("machinery.kotlin-jvm")
     application
@@ -40,9 +41,22 @@ val appStoreScripts by tasks.registering(CreateStartScripts::class) {
     classpath = files(tasks.jar) + configurations.runtimeClasspath.get()
 }
 
+val achievementsScripts by tasks.registering(CreateStartScripts::class) {
+    description = "Writes the start scripts of achievements, which brings a game's achievements up to date."
+    mainClass = "app.machinery.release.AchievementsToolKt"
+    applicationName = "achievements"
+    outputDir =
+        layout.buildDirectory
+            .dir("achievements-scripts")
+            .map { it.asFile }
+            .get()
+    classpath = files(tasks.jar) + configurations.runtimeClasspath.get()
+}
+
 distributions.main {
     contents {
         from(uploadListingScripts) { into("bin") }
         from(appStoreScripts) { into("bin") }
+        from(achievementsScripts) { into("bin") }
     }
 }

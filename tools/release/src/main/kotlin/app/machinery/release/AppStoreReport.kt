@@ -3,10 +3,14 @@ package app.machinery.release
 import java.io.File
 
 /**
- * What a run of the App Store tool did, what it left for the owner, and what failed. It names fields and states, never
- * the people in the team nor any key.
+ * What a run of the App Store tool (or of the achievements tool) did, what it left for the owner, and what failed,
+ * under its [title], the owner's part pointing to [ownerSteps]. It names fields and states, never the people in the
+ * team nor any key.
  */
-class AppStoreReport {
+class AppStoreReport(
+    private val title: String = "App Store",
+    private val ownerSteps: String = "docs/02-new-app.md, step 10b",
+) {
     private val done = mutableListOf<String>()
     private val owner = mutableListOf<String>()
     private val failures = mutableListOf<String>()
@@ -48,10 +52,10 @@ class AppStoreReport {
     /** The report in Markdown, for the run's summary. */
     fun markdown(): String =
         buildString {
-            appendLine("## App Store")
+            appendLine("## $title")
             section("How it stands", facts)
             section("Filled in by this run", done.ifEmpty { listOf("Nothing: the listing was already up to date.") })
-            section("Left for the owner (docs/02-new-app.md, step 10b)", owner)
+            section("Left for the owner ($ownerSteps)", owner)
             section("Failed", failures)
         }
 
