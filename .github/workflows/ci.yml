@@ -24,8 +24,9 @@ name: CI
 #   `PLAY_TRACK` variable is set);
 # - Google Play listing: the app's StoreArtTest draws the graphics, and the ones that changed are replaced; the texts,
 #   in every language, come from the App Store listing's folder and the Google Play one, and the languages that changed
-#   are written. A run started by hand with `store-listing` does only this and the App Store listing, on the default
-#   branch.
+#   are written. A game's achievements (`store/achievements.txt`) are made and brought up to date in Google Play Games
+#   too, with their texts in every language. A run started by hand with `store-listing` does only this and the App
+#   Store listing, on the default branch.
 # - Upload to TestFlight: the iOS app of the release, archived and signed by Apple's cloud signing with the App Store
 #   Connect API key, for the testers (once the `APPLE_TEAM_ID` variable is set).
 # - App Store listing: the release tool fills in the app's App Store Connect record from the listing the app keeps
@@ -33,8 +34,8 @@ name: CI
 #   price and the countries, the version being prepared (the release's build once processed, the texts in every
 #   language, the notes for App Review, the screenshots) and TestFlight: its texts, its internal group, and the
 #   external groups the listing names, which get the release's build, its notes as What to Test, and Beta App Review.
-#   It never submits a version to App Review. A run started by hand with `store-listing` does it too, on the default
-#   branch.
+#   It never submits a version to App Review. A game's achievements go to Game Center, with their texts and pictures in
+#   every language. A run started by hand with `store-listing` does it too, on the default branch.
 #
 # The app's .github/workflows/ci.yml calls this one: see docs/02-new-app.md.
 
@@ -103,6 +104,12 @@ on:
         description: How many minutes the App Store listing waits for App Store Connect to process the release's build
         type: number
         default: 30
+      achievements:
+        description: >-
+          A game's list of achievements (ids, points, and where their texts, pictures and Play Games ids are), which
+          the store listing jobs bring up to date in Google Play Games and Game Center; an app without it has none
+        type: string
+        default: store/achievements.txt
 
 permissions:
   contents: read
@@ -674,6 +681,14 @@ jobs:
           GOOGLE_PLAY_LISTING: ${{ inputs.google-play-listing }}
         run: |
           .machinery/tools/release/build/install/release/bin/upload-listing "$ART" "$APP_STORE_LISTING"             "$GOOGLE_PLAY_LISTING"
+      # A game's achievements, whatever the listing did; the ids Play makes for new ones show in the run's summary, for
+      # the app to keep
+      - name: Bring the achievements in Google Play Games up to date
+        if: ${{ !cancelled() && hashFiles(inputs.achievements) != '' }}
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.wif.outputs.access_token || steps.key.outputs.access_token }}
+          ACHIEVEMENTS: ${{ inputs.achievements }}
+        run: .machinery/tools/release/build/install/release/bin/achievements play-games "$ACHIEVEMENTS"
 
   testflight:
     name: Upload to TestFlight
@@ -782,6 +797,7 @@ jobs:
       contents: read
     env:
       LISTING: ${{ inputs.app-store-listing }}
+      ACHIEVEMENTS: ${{ inputs.achievements }}
     steps:
       - *checkout-app
       - id: listing
@@ -792,11 +808,17 @@ jobs:
           else
             echo "::notice::No $LISTING folder: the App Store listing is left as it is (docs/02-new-app.md, step 10b)."
           fi
+      - id: achievements
+        name: Whether the game keeps achievements
+        run: |
+          if [ -f "$ACHIEVEMENTS" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
       - *find-machinery
       - *checkout-machinery
       - *setup-build
-      - name: Draw the screenshots
-        if: steps.listing.outputs.found == 'true'
+      - name: Draw the screenshots and the achievements' pictures
+        if: steps.listing.outputs.found == 'true' || steps.achievements.outputs.found == 'true'
         env:
           TASKS: ${{ inputs.art }}
         # Word splitting is wanted: the tasks and options are separate arguments
@@ -804,7 +826,7 @@ jobs:
           # shellcheck disable=SC2086
           ./gradlew $TASKS
       - name: Build the release tool
-        if: steps.listing.outputs.found == 'true'
+        if: steps.listing.outputs.found == 'true' || steps.achievements.outputs.found == 'true'
         run: ./.machinery/gradlew -p .machinery :tools:release:installDist --quiet
       - name: The release's notes, for TestFlight's What to Test
         if: steps.listing.outputs.found == 'true' && needs.testflight.result == 'success'
@@ -824,3 +846,11 @@ jobs:
           RELEASE_NOTES_DIR: ${{ needs.testflight.result == 'success' && format('{0}/release-notes', runner.temp) || '' }}
           ART: ${{ inputs.art-dir }}
         run: .machinery/tools/release/build/install/release/bin/app-store "$LISTING" "$ART/app-store"
+      # A game's achievements, whatever the listing did
+      - name: Bring the achievements in Game Center up to date
+        if: ${{ !cancelled() && steps.achievements.outputs.found == 'true' }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: .machinery/tools/release/build/install/release/bin/achievements game-center "$ACHIEVEMENTS"

@@ -17,7 +17,8 @@ For changing the machinery, or understanding why it is built this way.
 plugins/                  the Gradle convention plugins (machinery.*), published on the machinery's GitHub Pages
 tools/release             the stores' "What's new" (translated by Claude), Google Play's listing graphics and texts
                           (bin/upload-listing) and the App Store listing (bin/app-store, through App Store Connect's
-                          API), both from the texts the app keeps in store/
+                          API), both from the texts the app keeps in store/, and a game's achievements in Google Play
+                          Games and Game Center (bin/achievements)
 tools/bump                the versions Dependabot can't see (JDK, Android SDK, Copilot CLI, Claude Code, actionlint)
 tools/thread              the only GitHub text the agents read: an issue's or pull request's conversation, as far
                           as maintainers wrote or saw it, without what the page doesn't show

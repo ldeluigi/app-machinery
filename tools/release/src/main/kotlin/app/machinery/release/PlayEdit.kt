@@ -8,11 +8,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
-import java.io.IOException
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
@@ -26,7 +23,7 @@ class PlayEdit private constructor(
     private val language: String,
 ) : ListingImages,
     ListingTexts {
-    private val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(TIMEOUT_S)).build()
+    private val requests = GoogleRequests("Google Play", FORBIDDEN_HINT)
     private val edit =
         "applications/$packageName/edits".let { edits ->
             "$edits/" + editId(send(request(edits).POST(HttpRequest.BodyPublishers.ofString("{}"))))
@@ -94,19 +91,7 @@ class PlayEdit private constructor(
             .timeout(Duration.ofSeconds(TIMEOUT_S))
     }
 
-    private fun send(builder: HttpRequest.Builder): String {
-        val request = builder.build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-        val status = response.statusCode()
-        if (status !in OK) {
-            val hint = if (status == FORBIDDEN) FORBIDDEN_HINT else ""
-            throw IOException(
-                "Google Play answered $status to ${request.method()} ${request.uri().path}$hint\n" +
-                    response.body().take(ERROR_BODY_CHARS),
-            )
-        }
-        return response.body()
-    }
+    private fun send(builder: HttpRequest.Builder): String = requests.send(builder)
 
     companion object {
         /** The language of the app's default store listing, the one Play falls back on. */
@@ -154,9 +139,6 @@ class PlayEdit private constructor(
         private const val HOST = "https://androidpublisher.googleapis.com"
         private const val API = "androidpublisher/v3"
         private const val TIMEOUT_S = 120L
-        private const val FORBIDDEN = 403
-        private const val ERROR_BODY_CHARS = 500
-        private val OK = 200..299
         private const val FORBIDDEN_HINT =
             " (the service account needs Manage store presence on the app: Play Console → Users and permissions)"
     }
