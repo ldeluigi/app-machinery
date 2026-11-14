@@ -329,6 +329,8 @@ and pictures; App Store Connect takes some 3,600 requests an hour, so a first ru
 languages may stop there and leave the rest to the next run (its report says so). Then:
 
 - [ ] The version that brings them: its page → **Game Center** → add the achievements. They go live with it.
-- [ ] The iOS app asks for Game Center in its entitlements file. On the first TestFlight build, check that the game
-      signs in to Game Center: the upload archives the app unsigned (10a), and Apple's cloud signing may leave the
-      entitlement out.
+- [ ] The iOS app asks for Game Center in an entitlements file that its target names (`CODE_SIGN_ENTITLEMENTS` in
+      `project.yml`, with `com.apple.developer.game-center` set to true). The upload archives the app unsigned (10a),
+      then signs it ad hoc with that file, so that Apple's cloud signing keeps the entitlement: the job's log lists
+      the entitlements the archive carries. Without it, App Store Connect refuses to send the version to review ("You
+      must add the com.apple.developer.game-center key").

@@ -737,13 +737,34 @@ jobs:
           cd "$APP" && xcodegen generate
       # Unsigned: a signed archive needs a development certificate and profile, which Xcode can't make for a team
       # without registered devices (testers install through TestFlight, so none is), and a new runner would make a new
-      # certificate each time, until Apple's limit. The app has no entitlements of its own to carry over.
+      # certificate each time, until Apple's limit.
       - name: Archive the app
         run: |
           xcodebuild archive \
             -project "$APP/App.xcodeproj" -scheme App -configuration Release \
             -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/App.xcarchive" \
             CODE_SIGNING_ALLOWED=NO
+      # The unsigned archive carries no entitlements, and the export signs with those it finds there: an app's own
+      # (its target's CODE_SIGN_ENTITLEMENTS, Game Center's say) would be left out, and App Review refuses a version
+      # whose build lacks one its features need. Signed ad hoc, which needs no certificate, the archived app carries
+      # them into the App Store signature. An app without its own entitlements is left as it is.
+      - name: Carry the app's entitlements into the archive
+        run: |
+          entitlements=$(xcodebuild -project "$APP/App.xcodeproj" -target App -configuration Release \
+            -showBuildSettings 2>/dev/null | awk -F ' = ' '/^ *CODE_SIGN_ENTITLEMENTS = /{print $2; exit}')
+          if [ -z "$entitlements" ]; then
+            echo "No entitlements of the app's own: the archive stays unsigned."
+            exit 0
+          fi
+          app="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          # Inside out: each embedded framework first, then the app, whose seal covers them.
+          if [ -d "$app/Frameworks" ]; then
+            find "$app/Frameworks" -mindepth 1 -maxdepth 1 \( -name '*.framework' -o -name '*.dylib' \) \
+              -exec codesign --force --sign - --timestamp=none {} \;
+          fi
+          codesign --force --sign - --timestamp=none --entitlements "$APP/$entitlements" "$app"
+          echo "The archived app carries these entitlements:"
+          codesign --display --entitlements - "$app"
       # Apple's cloud signing: with the App Store Connect API key (Admin access), Xcode signs the export with the
       # team's cloud-managed distribution certificate and an App Store profile it makes, so no signing material is kept
       # anywhere.
