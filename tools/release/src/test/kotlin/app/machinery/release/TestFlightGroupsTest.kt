@@ -174,6 +174,44 @@ class TestFlightGroupsTest :
             report.markdown() shouldContain "Build 1.2.0 (1002000) for external testers: IN_BETA_REVIEW"
         }
 
+        test("Apple's limit of Beta App Review submissions leaves the build for the next run, without failing it") {
+            val api =
+                FakeAppStore().apply {
+                    withFriends()
+                    errors["POST /v1/betaAppReviewSubmissions"] =
+                        "App Store Connect answered 422 to POST /v1/betaAppReviewSubmissions\n" +
+                        "ENTITY_UNPROCESSABLE.SUBMISSION_LIMIT_REACHED: Submission limit has been reached."
+                }
+            val report = run(api, notes)
+            report.failed shouldBe false
+            report.markdown() shouldContain "Build 1.2.0 (1002000) waits for Beta App Review"
+            report.markdown() shouldNotContain "sent to Beta App Review"
+        }
+
+        test("a build App Store Connect doesn't let groups have yet waits for the next run, without failing it") {
+            val api =
+                FakeAppStore().apply {
+                    withFriends()
+                    errors["POST /v1/betaGroups/G2/relationships/builds"] =
+                        "App Store Connect answered 404 to POST /v1/betaGroups/G2/relationships/builds\n" +
+                        "NOT_FOUND: The specified resource does not exist: There is no resource of type 'builds' " +
+                        "with id 'B1'"
+                }
+            val report = run(api, notes)
+            report.failed shouldBe false
+            report.markdown() shouldContain "Build 1.2.0 (1002000) isn't ready for TestFlight's groups yet"
+            api.writes shouldNotContain "POST /v1/betaAppReviewSubmissions"
+        }
+
+        test("any other refusal of the build still fails the run") {
+            val api =
+                FakeAppStore().apply {
+                    withFriends()
+                    errors["POST /v1/betaAppReviewSubmissions"] = "App Store Connect answered 409 to POST ..."
+                }
+            run(api, notes).failed shouldBe true
+        }
+
         test("a public link App Store Connect refuses is left to the owner, without failing the run") {
             val api =
                 FakeAppStore().apply {
