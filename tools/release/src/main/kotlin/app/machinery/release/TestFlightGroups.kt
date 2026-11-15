@@ -223,10 +223,18 @@ class ExternalTesting(
                 return
             }
         val name = "$version (${build.attributes.string("version")})"
-        groups.forEach { group ->
+        for (group in groups) {
             val has = api.getAll("/v1/betaGroups/$group/relationships/builds?limit=200").any { it.id == build.id }
             if (!has) {
-                api.post("/v1/betaGroups/$group/relationships/builds", links("builds", listOf(build.id)))
+                // App Store Connect knows a processed build in groups only some minutes later
+                val added =
+                    refusedFor(NOT_READY) {
+                        api.post("/v1/betaGroups/$group/relationships/builds", links("builds", listOf(build.id)))
+                    }
+                if (!added) {
+                    report.fact("Build $name isn't ready for TestFlight's groups yet: the next run adds it")
+                    return
+                }
                 report.done("TestFlight: build $name for external testers")
             }
         }
@@ -239,11 +247,21 @@ class ExternalTesting(
                 ?.string("externalBuildState")
         when {
             state == READY && reviewable -> {
-                api.post(
-                    "/v1/betaAppReviewSubmissions",
-                    create("betaAppReviewSubmissions", emptyMap(), mapOf("build" to link("builds", build.id))),
-                )
-                report.done("Build $name sent to Beta App Review")
+                val sent =
+                    refusedFor(SUBMISSION_LIMIT) {
+                        api.post(
+                            "/v1/betaAppReviewSubmissions",
+                            create("betaAppReviewSubmissions", emptyMap(), mapOf("build" to link("builds", build.id))),
+                        )
+                    }
+                if (sent) {
+                    report.done("Build $name sent to Beta App Review")
+                } else {
+                    report.fact(
+                        "Build $name waits for Beta App Review: Apple's limit of submissions was reached, the next " +
+                            "run sends it (or send it from TestFlight)",
+                    )
+                }
             }
 
             state == "BETA_REJECTED" -> {
@@ -283,10 +301,29 @@ class ExternalTesting(
         localizations.sync("What to Test", path, "betaBuildLocalizations", "build" to link("builds", build.id), wanted)
     }
 
+    /**
+     * Runs [call]: false when App Store Connect refuses it with an error whose message has [expected], one that
+     * passes by itself; any other error goes on.
+     */
+    private fun refusedFor(
+        expected: String,
+        call: () -> Unit,
+    ): Boolean =
+        runCatching(call).fold(
+            onSuccess = { true },
+            onFailure = { error -> if (expected in error.message.orEmpty()) false else throw error },
+        )
+
     private companion object {
         const val GROUPS = "betaGroups"
         const val DETAILS = "betaAppReviewDetails"
         const val READY = "READY_FOR_BETA_SUBMISSION"
+
+        /** Apple's cap on Beta App Review submissions, which lifts by itself within a day. */
+        const val SUBMISSION_LIMIT = "SUBMISSION_LIMIT_REACHED"
+
+        /** A processed build App Store Connect doesn't let groups have yet: it answers that there is no such build. */
+        const val NOT_READY = "There is no resource of type 'builds'"
         const val WHAT_TO_TEST_LIMIT = 4000
 
         /** The last character of the Basic Multilingual Plane: App Store Connect refuses any after it (emoji...). */
