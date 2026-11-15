@@ -316,8 +316,9 @@ Google Play Games, once:
       game's games services project ("No, my game doesn't use Google APIs") and its Android credential (an OAuth
       client for the package name and the SHA-1 of the app signing key, from **Test and release → App integrity**).
 - [ ] Same page → **Edit properties → Manage translations → Manage your own translations**: select every language
-      Play offers, **Apply**, **Save changes**. A games services project takes achievement texts only in the
-      languages it has; without them the job fails with 400, "The locale ... is not supported by the application".
+      Play offers, **Apply**, **Save changes**; then **Setup and management → Publishing → Publish**: the languages
+      count only once published. A games services project takes achievement texts only in the languages it has;
+      without them the job fails with 400, "The locale ... is not supported by the application".
 - [ ] Put the project's id into the ids file (`game_services_project_id`) and commit it. Until then the job only
       reminds you of it.
 - [ ] **Users and permissions** (the developer account's page, above the apps) → the service account of step 8 →
