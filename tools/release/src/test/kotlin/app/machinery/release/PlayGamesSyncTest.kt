@@ -100,11 +100,17 @@ class PlayGamesSyncTest :
             val achievements = Achievements.read(gameIn(dir), "en-US", dir)
             val (first, texts) = achievements.localized(PlayLanguages::codes).first()
             val old = PlayGamesSync.configuration(first.copy(points = 5), texts)
-            val api = FakePlayGames(mutableListOf(JsonObject(old + ("id" to JsonPrimitive("CgkOld")))))
+            val listed = old + ("id" to JsonPrimitive("CgkOld")) + ("token" to JsonPrimitive("tok-1"))
+            val api = FakePlayGames(mutableListOf(JsonObject(listed)))
             sync(dir, api)
             api.inserted.size shouldBe 1
             api.updated.map { it.first } shouldContainExactly listOf("CgkOld")
             (api.updated.single().second["draft"] as JsonObject).string("pointValue") shouldBe "10"
+            // Play refuses a change without the token it listed the achievement with
+            api.updated
+                .single()
+                .second
+                .string("token") shouldBe "tok-1"
             dir.resolve(idsPath).readText() shouldContain ">CgkOld</string>"
         }
 

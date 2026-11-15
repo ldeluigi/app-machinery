@@ -177,7 +177,9 @@ class PlayGamesSync(
                 val id = checkNotNull(current.string("id"))
                 found[achievement.id] = id
                 if (differs(current, wanted)) {
-                    api.update(id, JsonObject(wanted + ("id" to JsonPrimitive(id))))
+                    // Play takes a change only with the token it listed the achievement with
+                    val token = current["token"]?.let { "token" to it }
+                    api.update(id, JsonObject(wanted + ("id" to JsonPrimitive(id)) + listOfNotNull(token)))
                     changed++
                 }
             }
