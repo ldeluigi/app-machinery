@@ -13,11 +13,12 @@ name: Automation
 #   on the pull request's branch, or, on the default branch, in a new pull request that merges by itself.
 # - Issues and comments: Claude takes every issue the owner (or a collaborator) opens without the `needs-human`,
 #   `copilot` or `retry next week` label and without a person assigned, any issue given the `claude` label, and
-#   `@claude ...` in a comment, from maintainers only (write access). It says it's on it in a comment, which becomes
-#   its answer, commits to an `agent/issue-...` branch, and the bot opens the pull request, which merges by itself once
-#   CI is green. The `copilot` label, `@copilot ...`, or Claude being unable (no credential, usage limit, error, out of
-#   time) hands the issue to the Copilot CLI, which works the same way. An issue the agents ran out of credit for gets
-#   `retry next week`.
+#   `@claude ...` in a comment, from maintainers only (write access): in a new comment, or added to one by an edit (the
+#   `edited` events of comments and reviews, which the app's caller must listen to). Comments that don't name an agent
+#   call none. It says it's on it in a comment, which becomes its answer, commits to an `agent/issue-...` branch, and
+#   the bot opens the pull request, which merges by itself once CI is green. The `copilot` label, `@copilot ...`, or
+#   Claude being unable (no credential, usage limit, error, out of time) hands the issue to the Copilot CLI, which works
+#   the same way. An issue the agents ran out of credit for gets `retry next week`.
 # - An issue kept from the agents goes to them once nothing keeps it: when a maintainer takes its `retry next week`
 #   label off, or its last assignee (the `unassigned` event, which the app's caller must listen to) if no agent was
 #   called on it yet.
@@ -531,7 +532,9 @@ jobs:
     # An issue opened with the "claude" label is left to its "labeled" event, so it isn't taken twice. One opened with
     # the "retry next week" label, or assigned to a person, waits: its opener knows the credit is used up, or someone
     # is on it (the retry job below takes it once the label or the assignee goes). The association also counts
-    # read-only collaborators and organization members: the thread step checks the caller's access.
+    # read-only collaborators and organization members: the thread step checks the caller's access. A comment calls
+    # Claude by naming it, when posted or once an edit adds the name: other edits of a comment that named it don't call
+    # it again.
     if: >-
       (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review') &&
       ((github.event.action == 'labeled' && github.event.label.name == 'claude' &&
@@ -546,7 +549,8 @@ jobs:
             !contains(github.event.issue.labels.*.name, 'claude') &&
             !contains(github.event.issue.labels.*.name, 'retry next week') &&
             !contains(github.event.issue.assignees.*.type, 'User')) ||
-           contains(github.event.comment.body || github.event.review.body, '@claude'))))))
+           (contains(github.event.comment.body || github.event.review.body, '@claude') &&
+            (github.event.action != 'edited' || !contains(github.event.changes.body.from, '@claude'))))))))
     runs-on: ubuntu-latest
     # The first of Claude's three jobs, and the only one that reads the conversation: the workflow token reads the
     # pull request's branch, the conversation and its writers' access (tools/thread). None of the app's code runs here
@@ -878,7 +882,8 @@ jobs:
   issue-copilot-start:
     name: "Copilot: start"
     # The "copilot" label, added by a person or by Claude's publish job above as the bot App, or "@copilot ..." from
-    # someone with write access, never from a bot; the thread step checks the caller's access
+    # someone with write access, never from a bot; the thread step checks the caller's access. As for Claude, an edit
+    # calls Copilot only when it adds the name
     if: >-
       (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review') &&
       ((github.event.action == 'labeled' && github.event.label.name == 'copilot' &&
@@ -886,7 +891,8 @@ jobs:
        (github.event.sender.type == 'User' &&
         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
                  github.event.comment.author_association || github.event.review.author_association) &&
-        contains(github.event.comment.body || github.event.review.body, '@copilot')))
+        contains(github.event.comment.body || github.event.review.body, '@copilot') &&
+        (github.event.action != 'edited' || !contains(github.event.changes.body.from, '@copilot'))))
     runs-on: ubuntu-latest
     # As Claude's start job: the only one of Copilot's three that reads the conversation, and it runs none of the
     # app's code

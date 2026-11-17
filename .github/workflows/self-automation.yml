@@ -20,11 +20,11 @@ on:
   issues:
     types: [opened, labeled, unlabeled, unassigned]
   issue_comment:
-    types: [created]
+    types: [created, edited]
   pull_request_review_comment:
-    types: [created]
+    types: [created, edited]
   pull_request_review:
-    types: [submitted]
+    types: [submitted, edited]
   push:
     branches: [main]
     paths:
