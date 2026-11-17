@@ -77,7 +77,7 @@ androidComponents {
     }
 }
 
-allowOpenSourceLicences()
+allowLicences()
 
 dependencies {
     "implementation"(platform(lib("compose-bom")))

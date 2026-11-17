@@ -4,8 +4,8 @@
 # - The commit they start from is worked out here, never taken from the agent's job: where <tip> leaves HEAD's
 #   history. On a branch of the agent's own ("new") that is wherever it started; on an existing one it must be HEAD
 #   itself, or the branch got commits while the agent worked and the agent's no longer follow it.
-# - The commits may not change what the agents themselves may do (the paths given): an agent that could change its own
-#   settings could give itself any command.
+# - The commits may not change what only the owner changes (the paths given): what the agents themselves may do (an
+#   agent that could change its own settings could give itself any command) and the licences the app may ship.
 # Prints the commit they start from, or nothing when <tip> adds no commit.
 # Usage: check-agent-commits.sh <tip> <new|existing> [path...]
 set -euo pipefail
@@ -28,7 +28,7 @@ fi
 if [ "$#" -gt 0 ]; then
   changed="$(git diff --name-only "$start" "$tip" -- "$@" | paste -sd ' ' -)"
   if [ -n "$changed" ]; then
-    echo "::error title=Not the agents' to change::The commits change what the agents may do ($changed), which only the owner changes: nothing is pushed." >&2
+    echo "::error title=Not the agents' to change::The commits change files only the owner changes ($changed): nothing is pushed." >&2
     exit 1
   fi
 fi

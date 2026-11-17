@@ -57,12 +57,26 @@ internal fun Project.useProjectDetektConfig() {
     }
 }
 
+/** The app's own list of the licences it may ship besides the machinery's, which only its owner changes. */
+internal const val APP_LICENCES = "config/licences.txt"
+
 /**
  * The licences every shipped dependency must carry, checked by Licensee on the modules that ship: the open-source
- * ones, plus the one exception of the stores' own libraries (Google Play in-app updates and the Play services runtime
- * they need, as Play policy requires apps on Google Play to update through Play itself).
+ * ones, the stores' own libraries (Google Play in-app updates and the Play services runtime they need, as Play policy
+ * requires apps on Google Play to update through Play itself), and whatever the app's owner allows in
+ * [APP_LICENCES]: an SPDX identifier (`MPL-2.0`) or a licence's URL a line, `#` starting a comment line. Without the
+ * file, the app ships only what the machinery allows.
  */
-internal fun Project.allowOpenSourceLicences() {
+internal fun Project.allowLicences() {
+    val app =
+        providers
+            .fileContents(rootProject.layout.projectDirectory.file(APP_LICENCES))
+            .asText
+            .orNull
+            .orEmpty()
+            .lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") }
     extensions.configure<LicenseeExtension> {
         allow("Apache-2.0")
         allow("MIT")
@@ -72,6 +86,13 @@ internal fun Project.allowOpenSourceLicences() {
         allowUrl("https://developer.android.com/guide/playcore/license") { because("Google Play in-app updates") }
         allowUrl("https://developer.android.com/studio/terms.html") {
             because("Play services runtime of in-app updates")
+        }
+        app.forEach { licence ->
+            if (licence.startsWith("https://") || licence.startsWith("http://")) {
+                allowUrl(licence) { because("allowed in $APP_LICENCES") }
+            } else {
+                allow(licence)
+            }
         }
     }
 }

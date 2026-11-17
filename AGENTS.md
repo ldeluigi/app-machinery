@@ -7,7 +7,8 @@ before changing anything.
 ## Hard rules
 
 1. **App-agnostic.** Nothing here names an app, its features or its brand: what differs between apps is an input, a
-   variable or a file in the app (`config/forbidden-names.txt`, `config/build-only-deps.txt`, `AGENTS.md`).
+   variable or a file in the app (`config/forbidden-names.txt`, `config/build-only-deps.txt`, `config/licences.txt`,
+   `AGENTS.md`).
 2. **No personal names** or usernames of the maintainers anywhere: code, docs, settings, commit messages.
 3. **Conventional Commits** for every commit and pull request title: commits 100 characters at most, titles 90
    (squash-merging adds " (#123)"). `feat` and `fix` release a new version to every app; use `docs`, `ci`, `build`,

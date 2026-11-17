@@ -119,7 +119,7 @@ val checkTranslations =
     }
 tasks.named("check") { dependsOn(checkTranslations) }
 
-allowOpenSourceLicences()
+allowLicences()
 
 checkHandWrittenSourcesOnly()
 

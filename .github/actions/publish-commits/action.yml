@@ -6,8 +6,8 @@ description: >-
   where no agent and none of its builds ran, fetches them without checking them out, and works out by itself, in a
   fresh checkout of the branch the agent started from, what they add. The bot App token has no Workflows permission, so
   a commit that touches workflow files is refused; so are, here, commits that change what the agents themselves may do
-  (`protected`), which stays the owner's to change. Expects that fresh checkout, with all its history, and the
-  machinery checked out in .machinery.
+  or the licences the app may ship (`protected`), which stay the owner's to change. Expects that fresh checkout, with
+  all its history, and the machinery checked out in .machinery.
 inputs:
   token:
     description: The bot App's token (contents and pull requests write)
@@ -32,8 +32,9 @@ inputs:
   protected:
     description: >-
       The files and folders the agents' commits may not change, separated by spaces: the settings that decide what
-      Claude Code and the Copilot CLI may run in the repository
-    default: .claude/settings.json .claude/settings.local.json .mcp.json .github/copilot .github/hooks
+      Claude Code and the Copilot CLI may run in the repository, and the licences the app may ship besides the
+      machinery's (an agent could otherwise make a failing licence check pass by allowing the licence)
+    default: .claude/settings.json .claude/settings.local.json .mcp.json .github/copilot .github/hooks config/licences.txt
 outputs:
   pushed:
     description: '"true" when there were commits and they were pushed'

@@ -53,6 +53,11 @@ needs (`machinery.compose-library`, `machinery.android-application`, ...), from 
 Multiplatform versions, the SDK levels, the test libraries and the static analysis settings: one version bump in the app
 brings them all, tested together. The app's own catalog lists only the libraries its code uses.
 
+The plugins also check the licence of every library the app ships (Licensee). Apache-2.0, MIT, BSD and CC0 are always
+allowed, plus Google Play's in-app updates. Each app's owner can allow more in the app's `config/licences.txt`: one
+SPDX identifier (`MPL-2.0`) or licence URL per line, `#` starting a comment line. The agents' commits may not change
+that file, so a failing licence check stays the owner's call.
+
 ## How the machinery maintains itself
 
 - **Dependabot** bumps the actions and the Gradle plugins and libraries of its catalog, weekly, as `fix` commits.
@@ -78,7 +83,7 @@ brings them all, tested together. The app's own catalog lists only the libraries
 - **Agents never change workflows**: the bot's token for their commits has no Workflows permission, so an agent can't
   widen its own powers. For the same reason `publish-commits` refuses commits that change the agents' own settings
   (`.claude/settings.json`, `.mcp.json`, Copilot's `.github/copilot/` and `.github/hooks/`), which can allow any
-  command.
+  command, and the licences the app may ship (`config/licences.txt`), which could let a failing licence check pass.
 - **The bot's key never shares a runner with an agent**: an agent's commands run the code of the app and of
   everything it depends on, as the user the runner's own steps run as, so what a job holds, they can reach. Each agent
   therefore works in a job that holds its model's credential and the workflow token, which there only reads the
