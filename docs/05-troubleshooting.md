@@ -21,6 +21,7 @@ are the ones that land on you, with what to do.
 | Google Play upload fails with 403 | The service account lacks a permission on the app | Play Console → Users and permissions → `publisher@…` → App permissions (docs/02-new-app.md step 8). |
 | Google Play upload fails with "Package not found" | The app isn't on Play yet, or `app.id` is wrong | Do the first upload by hand (docs/02-new-app.md step 7); check `app.id` in the app's `gradle.properties`. |
 | Store listing fails with 403 | No **Manage store presence** for the service account | As above. |
+| A pull request's check is "cancelled", and nothing followed | A newer push, or a person, cancelled its run: the automation re-runs only the runs GitHub stopped at a job's time limit ("exceeded the maximum execution time") | Push again, or **Re-run all jobs**. |
 | "The job was not acquired by Runner" on the iOS job | GitHub's macOS runners were busy | Re-run the job; it isn't a code problem. |
 | The iOS UI test can't find the home screen | The app crashed or was too slow to draw | The run's `ios-screenshots` artifact holds a screen recording (`.mp4`) and the crash report (`.ips`). |
 | "Upload to TestFlight" fails with "No profiles for ..." or a bundle identifier error | The app's id isn't registered with Apple, or the API key hasn't Admin access | docs/02-new-app.md step 10a; the key needs **Admin**. Then **Re-run failed jobs**. |

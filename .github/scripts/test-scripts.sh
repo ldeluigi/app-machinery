@@ -3,7 +3,8 @@
 # - out-of-credit.sh tells the agents' messages about a used-up quota (the issue waits for the reset) from every other
 #   error (a failure of the automation);
 # - check-agent-commits.sh lets through only commits that follow the branch and leave the agents' settings alone;
-# - wait-for-publish.sh waits for another run's agent exactly while its commits are still to be published.
+# - wait-for-publish.sh waits for another run's agent exactly while its commits are still to be published;
+# - timed-out.sh tells the jobs GitHub stopped at their time limit from the ones a newer run or a person cancelled.
 # Usage: test-scripts.sh
 set -euo pipefail
 
@@ -130,6 +131,36 @@ expect_wait starts "automation / Claude|completed|cancelled" "automation / Claud
 expect_wait starts "automation / Claude|in_progress|"
 expect_wait starts "automation / Claude|completed|skipped"
 expect_wait starts "automation / Copilot|completed|success" "automation / Claude: start|completed|success"
+
+# The time limits, with a gh that answers what the script asks: the run's cancelled jobs, then each one's failure
+# annotations
+cat > "$work/bin/gh" << 'GH'
+#!/usr/bin/env bash
+case "$2" in
+  */runs/*/jobs\?*) ls "$ANNOTATIONS" ;;
+  */check-runs/*/annotations\?*) job="${2#*/check-runs/}" && cat "$ANNOTATIONS/${job%%/*}" ;;
+esac
+GH
+expect_timed_out() { # <the jobs it prints, space-separated> <each cancelled job's annotation, "id|message">...
+  local found entry
+  rm -rf "$work/annotations" && mkdir "$work/annotations"
+  for entry in "${@:2}"; do echo "${entry#*|}" >> "$work/annotations/${entry%%|*}"; done
+  found="$(PATH="$work/bin:$PATH" ANNOTATIONS="$work/annotations" GH_REPO=owner/app \
+    "$scripts/timed-out.sh" 7 | paste -sd ' ' -)"
+  if [ "$found" != "$1" ]; then
+    echo "::error::timed-out.sh prints \"$found\" for the cancelled jobs: ${*:2}. It should print \"$1\"."
+    status=1
+  fi
+}
+
+expect_timed_out "11" "11|The job has exceeded the maximum execution time of 45m0s"
+expect_timed_out "11" "11|The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 45 minutes."
+expect_timed_out "" "11|Canceling since a higher priority waiting request for ci-refs/pull/9/merge-pull_request exists"
+expect_timed_out "" "11|The operation was canceled."
+expect_timed_out "12" "11|The operation was canceled." "12|The job has exceeded the maximum execution time of 60m0s"
+expect_timed_out "11 12" "11|The job has exceeded the maximum execution time of 45m0s" \
+  "12|The job has exceeded the maximum execution time of 60m0s"
+expect_timed_out ""
 
 [ "$status" -ne 0 ] || echo "The scripts pass their tests."
 exit $status

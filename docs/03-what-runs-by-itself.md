@@ -16,8 +16,8 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 | Every pull request, and its renames | Automation → Pull request title | The title is a Conventional Commit of 100 characters at most, counting the " (#123)" that squash-merging adds (it becomes the commit on `main`) |
 | Dependabot's and the bot's pull requests | Automation → automerge | GitHub merges them once CI is green; build-only updates merge as `build(deps)`, which releases nothing |
 | The `ios` label on a pull request | Automation → Build for iOS too | Starts CI on the pull request's branch, with its iOS build |
-| A failed CI run | Automation → Re-run failed jobs once | Network hiccups and lost runners fix themselves |
-| A run that failed twice | Automation → Triage, Fix, Fix: publish | An agent fixes it, on the pull request's branch or in a new pull request; after three attempts, `needs-human` and an issue |
+| A failed CI run, or one GitHub stopped at a job's time limit | Automation → Re-run failed jobs once | Network hiccups, lost runners and runners that stopped answering fix themselves. A run cancelled by a newer push or by hand is left as it is |
+| A run that failed, or ran out of time, twice | Automation → Triage, Fix, Fix: publish | An agent fixes it, on the pull request's branch or in a new pull request; after three attempts, `needs-human` and an issue |
 | A new issue, the `claude` label, or `@claude` in a comment, from a maintainer | Automation → Claude: start, Claude, Claude: publish | Claude works on it; the bot opens the pull request, which closes the issue and merges by itself once CI is green. A new issue with the `needs-human` or `retry next week` label, or with someone assigned, is left alone |
 | The `copilot` label, `@copilot`, or when Claude can't | Automation → Copilot: start, Copilot, Copilot: publish | The Copilot CLI does the same |
 | A major update merged | Automation → Adopt the new versions, and its publish job | An agent adopts what the new version recommends, in a pull request that merges by itself |
