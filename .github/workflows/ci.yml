@@ -315,7 +315,11 @@ jobs:
     name: Build and test for iOS
     needs: scope
     if: needs.scope.outputs.ios == 'true'
-    runs-on: macos-latest
+    # GitHub keeps one major Xcode per macOS image: macos-latest is macOS 26 with Xcode 26, and App Store Connect wants
+    # an app built with the newest iOS SDK (Xcode 27's from April 2027). The TestFlight job builds on the same image, so
+    # what ships is what was tested. Each year, Apple's "ITMS-90725: SDK version issue" email says it's time for the
+    # next one (docs/05-troubleshooting.md).
+    runs-on: xcode-27
     timeout-minutes: 60
     permissions:
       contents: read
@@ -698,7 +702,8 @@ jobs:
     # !cancelled(): without a status function, GitHub adds success(), which fails when any job upstream was skipped,
     # like the iOS build of a push that changes no code: the release succeeded, and this job was skipped all the same.
     if: ${{ !cancelled() && needs.release.outputs.published == 'true' && vars.APPLE_TEAM_ID != '' }}
-    runs-on: macos-latest
+    # The Xcode the iOS job tests with (see there)
+    runs-on: xcode-27
     environment: release
     # The release build of the Kotlin framework, then the archive
     timeout-minutes: 90

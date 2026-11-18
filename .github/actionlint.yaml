@@ -1,4 +1,9 @@
 # actionlint settings (Self CI runs it on every change).
+self-hosted-runner:
+  # GitHub-hosted labels that actionlint's own list doesn't have yet: GitHub's runner-images README lists them.
+  labels:
+    # The image of Xcode 27, which the iOS jobs build with
+    - xcode-27
 paths:
   .github/workflows/**/*.yml:
     ignore:
