@@ -1,0 +1,150 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "app.machinery",
+    "module": "plugins",
+    "version": "1.11.1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.9.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "files": [
+        {
+          "name": "plugins-1.11.1.jar",
+          "url": "plugins-1.11.1.jar",
+          "size": 2093124,
+          "sha512": "e2003eeff4be4c468d99948580cdbdff8caffe9cab8f5525e3a97a29231911b4fb267f5ef958eeedc452c26e3b6773c9e1b64cae927134671b7b288f93b9ce1c",
+          "sha256": "719541d9378d19807f7e894c40bc29dc19b15bf73316b4f0ae156c2e3dd4810d",
+          "sha1": "d9cecc981f8d5063cd42781a5fa902fd0f9f29c4",
+          "md5": "a697132ea6403b09ba807bd9f130371c"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.android.tools.build",
+          "module": "gradle",
+          "version": {
+            "requires": "9.4.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-gradle-plugin",
+          "version": {
+            "requires": "2.4.21"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-serialization",
+          "version": {
+            "requires": "2.4.21"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "compose-compiler-gradle-plugin",
+          "version": {
+            "requires": "2.4.21"
+          }
+        },
+        {
+          "group": "org.danilopianini.gradle-kotlin-qa",
+          "module": "org.danilopianini.gradle-kotlin-qa.gradle.plugin",
+          "version": {
+            "requires": "1.11.4"
+          }
+        },
+        {
+          "group": "org.danilopianini.git-sensitive-semantic-versioning",
+          "module": "org.danilopianini.git-sensitive-semantic-versioning.gradle.plugin",
+          "version": {
+            "requires": "7.3.3"
+          }
+        },
+        {
+          "group": "app.cash.licensee",
+          "module": "licensee-gradle-plugin",
+          "version": {
+            "requires": "1.14.1"
+          }
+        },
+        {
+          "group": "com.mikepenz.aboutlibraries.plugin",
+          "module": "com.mikepenz.aboutlibraries.plugin.gradle.plugin",
+          "version": {
+            "requires": "15.3.0"
+          }
+        },
+        {
+          "group": "io.kotest",
+          "module": "io.kotest.gradle.plugin",
+          "version": {
+            "requires": "6.2.5"
+          }
+        },
+        {
+          "group": "com.google.devtools.ksp",
+          "module": "com.google.devtools.ksp.gradle.plugin",
+          "version": {
+            "requires": "2.3.13"
+          }
+        },
+        {
+          "group": "org.jetbrains.compose",
+          "module": "compose-gradle-plugin",
+          "version": {
+            "requires": "1.12.2"
+          }
+        },
+        {
+          "group": "com.ibm.icu",
+          "module": "icu4j",
+          "version": {
+            "requires": "79.1"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "plugins-1.11.1.jar",
+          "url": "plugins-1.11.1.jar",
+          "size": 2093124,
+          "sha512": "e2003eeff4be4c468d99948580cdbdff8caffe9cab8f5525e3a97a29231911b4fb267f5ef958eeedc452c26e3b6773c9e1b64cae927134671b7b288f93b9ce1c",
+          "sha256": "719541d9378d19807f7e894c40bc29dc19b15bf73316b4f0ae156c2e3dd4810d",
+          "sha1": "d9cecc981f8d5063cd42781a5fa902fd0f9f29c4",
+          "md5": "a697132ea6403b09ba807bd9f130371c"
+        }
+      ]
+    }
+  ]
+}
