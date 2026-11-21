@@ -74,6 +74,27 @@ runs:
           echo "There are no commits to push."
           exit 0
         fi
+        # A new branch starts from the default branch as it is now, not as it was when the agent began: if a workflow
+        # changed there meanwhile, a branch carrying the older file is a workflow change, which GitHub refuses from
+        # the bot. The agent's commits are replayed on it, the same changes, without running anything of theirs;
+        # when they don't apply as they are, they go as they were made.
+        now="$(git rev-parse HEAD)"
+        if [ "$OPEN" = "true" ] && [ "$now" != "$start" ]; then
+          if git -c core.hooksPath=/dev/null -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            rebase --quiet --onto "$now" "$start" "$tip" > /dev/null 2>&1; then
+            tip="$(git rev-parse HEAD)"
+            start="$now"
+            if [ "$tip" = "$now" ]; then
+              echo "The agent's commits are all on $BASE already: there is nothing to push."
+              exit 0
+            fi
+            echo "The agent's commits now follow $BASE as it is."
+          else
+            git rebase --abort > /dev/null 2>&1 || true
+            echo "::warning::The agent's commits don't apply to $BASE as it is now: they are pushed as they were made."
+          fi
+        fi
         # Without the checkout's hooks, which would run with the token
         git -c core.hooksPath=/dev/null push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$tip:refs/heads/$BRANCH"
         echo "pushed=true" >> "$GITHUB_OUTPUT"
