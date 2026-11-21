@@ -67,10 +67,24 @@ class PlayEdit private constructor(
         )
     }
 
-    /** Publishes the edit's changes, sending them to Google's review. */
-    fun commit() {
-        send(request("$edit:commit").POST(HttpRequest.BodyPublishers.noBody()))
-    }
+    /**
+     * Publishes the edit's changes, and returns whether Play sent them to Google's review. When Play won't send them
+     * itself ([holdsForReview]), they are published as changes waiting for the owner to send them for review in Play
+     * Console, and it returns false; if Play refuses that too, its second answer is the error, with the first.
+     */
+    fun commit(): Boolean =
+        try {
+            send(request("$edit:commit").POST(HttpRequest.BodyPublishers.noBody()))
+            true
+        } catch (refused: GoogleApiException) {
+            if (!holdsForReview(refused)) throw refused
+            try {
+                send(request("$edit:commit?changesNotSentForReview=true").POST(HttpRequest.BodyPublishers.noBody()))
+            } catch (again: GoogleApiException) {
+                throw again.apply { addSuppressed(refused) }
+            }
+            false
+        }
 
     /** Throws the edit away, with its changes. */
     fun discard() {
@@ -136,10 +150,24 @@ class PlayEdit private constructor(
                         .jsonPrimitive.content
                 }.orEmpty()
 
+        /**
+         * Whether Play refused to commit an edit because it won't send its changes to review by itself, so they can
+         * only wait for the owner to send them: a 400 that asks for `changesNotSentForReview`, as when the app's
+         * changes wait for the owner to publish them; or a 403, as Play answers for an app it never reviewed, even
+         * when the service account has every permission.
+         */
+        fun holdsForReview(refused: GoogleApiException): Boolean =
+            refused.status == FORBIDDEN ||
+                (refused.status == BAD_REQUEST && "changesNotSentForReview" in refused.body)
+
+        private const val BAD_REQUEST = 400
+        private const val FORBIDDEN = 403
         private const val HOST = "https://androidpublisher.googleapis.com"
         private const val API = "androidpublisher/v3"
         private const val TIMEOUT_S = 120L
         private const val FORBIDDEN_HINT =
-            " (the service account needs Manage store presence on the app: Play Console → Users and permissions)"
+            " (the service account needs Manage store presence on the app: Play Console → Users and permissions;" +
+                " Play also refuses to commit the listing of an app it never reviewed, until its first release is" +
+                " sent for review in Play Console)"
     }
 }

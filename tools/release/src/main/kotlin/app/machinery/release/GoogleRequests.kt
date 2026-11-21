@@ -6,6 +6,13 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 
+/** Google's answer [status] with its [body], to a request that failed: [message] says which, and what to do. */
+class GoogleApiException(
+    val status: Int,
+    val body: String,
+    message: String,
+) : IOException(message)
+
 /**
  * Sends requests to one of Google's APIs, named [service] in its errors, which add [forbiddenHint] to a 403: the
  * permission the service account lacks.
@@ -23,7 +30,9 @@ class GoogleRequests(
         val status = response.statusCode()
         if (status !in OK) {
             val hint = if (status == FORBIDDEN) forbiddenHint else ""
-            throw IOException(
+            throw GoogleApiException(
+                status,
+                response.body(),
                 "$service answered $status to ${request.method()} ${request.uri().path}$hint\n" +
                     response.body().take(ERROR_BODY_CHARS),
             )
