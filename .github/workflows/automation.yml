@@ -308,6 +308,7 @@ jobs:
       pull-request: ${{ steps.count.outputs.pull-request }}
       engine: ${{ steps.count.outputs.engine }}
       timed-out: ${{ steps.limit.outputs.jobs }}
+      failed-jobs: ${{ steps.failed.outputs.jobs }}
     steps:
       - *find-machinery
       - *checkout-machinery
@@ -322,6 +323,23 @@ jobs:
           jobs="$(.machinery/.github/scripts/timed-out.sh "$RUN_ID")"
           jobs="${jobs//$'\n'/ }"
           [ -n "$jobs" ] || echo "Cancelled by a newer run or by hand, not at a time limit: nothing to fix."
+          echo "jobs=$jobs" >> "$GITHUB_OUTPUT"
+      # The issue that tells the owner names them: a failure of the same jobs is added to the issue still open for it
+      - id: failed
+        name: Name the jobs that failed
+        if: github.event.workflow_run.conclusion == 'failure' || steps.limit.outputs.jobs != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          TIMED_OUT: ${{ steps.limit.outputs.jobs }}
+        # The ids of the jobs that ran out of time (the step above) join the jobs that failed, by name; the $ are jq's
+        run: |
+          # shellcheck disable=SC2016
+          jobs="$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '
+            (env.TIMED_OUT | split(" ") | map(select(. != "") | tonumber)) as $out
+            | [.jobs[] | select(.conclusion == "failure" or (.id as $id | $out | any(. == $id))) | .name]
+            | unique | join(", ")')"
           echo "jobs=$jobs" >> "$GITHUB_OUTPUT"
       - id: token
         if: github.event.workflow_run.conclusion == 'failure' || steps.limit.outputs.jobs != ''
@@ -512,7 +530,8 @@ jobs:
           branch: ${{ needs.fix-triage.outputs.pull-request && github.event.workflow_run.head_branch || format('agent/fix-{0}', github.event.workflow_run.id) }}
           open-pull-request: ${{ needs.fix-triage.outputs.pull-request == '' }}
           body: Fixes the failure of [${{ github.event.workflow_run.name }}](${{ github.event.workflow_run.html_url }}), from the CI-fix agent.
-      # No fix: code can't make one, as the agent's answer says, or no agent could run
+      # No fix: code can't make one, as the agent's answer says, or no agent could run. The same jobs failing again,
+      # like a store refusing every release the same way, add to the issue still open for them instead of a new one.
       - name: Tell the owner
         if: ${{ !cancelled() && steps.token.outcome == 'success' && steps.publish.outputs.pushed != 'true' }}
         env:
@@ -520,10 +539,25 @@ jobs:
           GH_REPO: ${{ github.repository }}
           WORKFLOW: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
+          FAILED_JOBS: ${{ needs.fix-triage.outputs.failed-jobs }}
           ANSWER: "${{ needs.fix.outputs.response || format('No agent could look at it: {0}', needs.fix.outputs.error || (needs.fix.result != 'success' && 'its job stopped before it finished, see the run.') || 'neither Claude nor Copilot is set up.') }}"
         run: |
-          gh issue create --title "Automation needs a human: $WORKFLOW failed" \
-            --body "$(printf '[%s failed twice](%s), and no fix came of it.\n\n%s' "$WORKFLOW" "$RUN_URL" "$ANSWER")"
+          title="Automation needs a human: $WORKFLOW failed"
+          marker="<!-- failed jobs: $FAILED_JOBS -->"
+          open=""
+          if [ -n "$FAILED_JOBS" ]; then
+            open="$(TITLE="$title" MARKER="$marker" gh issue list --state open --limit 200 --json number,title,body \
+              --jq '[.[] | select(.title == env.TITLE and (.body | contains(env.MARKER)))][0].number // empty')" ||
+              open=""
+          fi
+          if [ -n "$open" ]; then
+            gh issue comment "$open" \
+              --body "$(printf '[It failed again](%s), and no fix came of it.\n\n%s' "$RUN_URL" "$ANSWER")"
+            echo "Added to #$open, still open for the same failing jobs: $FAILED_JOBS"
+          else
+            gh issue create --title "$title" \
+              --body "$(printf '[%s failed twice](%s), and no fix came of it.\n\n%s\n\n%s' "$WORKFLOW" "$RUN_URL" "$ANSWER" "$marker")"
+          fi
 
   issue-claude-start:
     name: "Claude: start"

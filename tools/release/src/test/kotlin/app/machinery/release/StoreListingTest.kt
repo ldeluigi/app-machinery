@@ -99,4 +99,19 @@ class StoreListingTest :
             ) shouldContainExactly listOf("ab12", "cd34")
             PlayEdit.imageHashes("{}").shouldBeEmpty()
         }
+
+        test("a commit Play won't send to review by itself is held for the owner, other refusals are errors") {
+            fun refusal(
+                status: Int,
+                body: String,
+            ) = GoogleApiException(status, body, "Google Play answered $status")
+            val held =
+                """{"error": {"code": 400, "message": "Changes cannot be sent for review automatically. """ +
+                    """Please set the query parameter changesNotSentForReview to true."}}"""
+            val denied = """{"error": {"code": 403, "status": "PERMISSION_DENIED"}}"""
+            PlayEdit.holdsForReview(refusal(400, held)) shouldBe true
+            PlayEdit.holdsForReview(refusal(403, denied)) shouldBe true
+            PlayEdit.holdsForReview(refusal(400, """{"error": {"message": "Invalid listing"}}""")) shouldBe false
+            PlayEdit.holdsForReview(refusal(500, held)) shouldBe false
+        }
     })

@@ -3,7 +3,8 @@ package app.machinery.release
 import java.io.File
 
 /**
- * Brings the app's store listing on Google Play up to date, in one edit committed only if something changed:
+ * Brings the app's store listing on Google Play up to date, in one edit committed only if something changed (when
+ * Play won't send the changes to review by itself, they wait for the owner to send them: [PlayEdit.commit]):
  * - the default listing's graphics, with the ones StoreArtTest drew into `composeApp/build/store-art` (the first
  *   argument): the types that changed are replaced;
  * - every language's texts ([PlayListing]), from the App Store listing (`store/app-store`, the second argument) and
@@ -32,10 +33,17 @@ fun main(args: Array<String>) {
         edit.discard()
         println("The store listing is up to date.")
     } else {
-        edit.commit()
+        val sentForReview = edit.commit()
         if (images.isNotEmpty()) println("Replaced the store listing's ${images.joinToString { it.apiName }}.")
         if (languages.isNotEmpty()) println("Wrote the store listing's texts in ${languages.joinToString()}.")
-        println("Google reviews the listing again.")
+        println(
+            if (sentForReview) {
+                "Google reviews the listing again."
+            } else {
+                "::warning::Google Play keeps the listing's changes until they are sent for review: Play Console → " +
+                    "Publishing overview → Send changes for review."
+            },
+        )
     }
 }
 
