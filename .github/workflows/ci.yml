@@ -521,6 +521,31 @@ jobs:
             sed -e "s|@APP@|$APP|g" -e "s|@BRANCH@|$BRANCH|g" .machinery/release/releaserc.yml > .releaserc.yml
             echo ".releaserc.yml" >> .git/info/exclude
           fi
+      # A release whose runner GitHub lost between tagging and publishing leaves its tag and a draft release behind:
+      # semantic-release would count from that tag, and that version would never be made. The stores never got it,
+      # since their jobs wait for this job's published release, so the tag and its drafts go, and semantic-release makes
+      # that version again here, with what came since. Only the newest tag is looked at.
+      - name: Undo a release that was never published
+        if: steps.gate.outputs.newest == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tags="$(git tag --merged HEAD --list 'v[0-9]*' --sort=-version:refname)"
+          tag="${tags%%$'\n'*}"
+          [ -n "$tag" ] || exit 0
+          releases="$(TAG="$tag" gh api "repos/$GH_REPO/releases?per_page=100" --paginate \
+            --jq '.[] | select(.tag_name == env.TAG) | "\(.id) \(.draft)"')"
+          if grep -q ' false$' <<< "$releases"; then
+            echo "$tag was published."
+            exit 0
+          fi
+          echo "::warning::$tag was tagged but never published, as its run stopped: it is made again from this commit."
+          while read -r id _; do
+            if [ -n "$id" ]; then gh api -X DELETE "repos/$GH_REPO/releases/$id"; fi
+          done <<< "$releases"
+          gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$tag"
+          git tag -d "$tag"
       - name: Decode the upload key
         if: steps.gate.outputs.newest == 'true'
         env:
