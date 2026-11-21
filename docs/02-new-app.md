@@ -78,11 +78,19 @@ address keeps yours off the stores and forwards everything to you. One address c
 
 ### 5b. A public page for the privacy policy
 
-The repository is private, so its `docs/privacy-policy.md` isn't public.
+The repository is private, so its `docs/privacy-policy.md` isn't public. The CI publishes that file, and nothing else,
+when the app's `ci.yml` caller names it in `privacy-page` (the template's does): on every push to `main` whose policy
+changed, it becomes `index.md` on the repository's `gh-pages` branch, which GitHub Pages serves. GitHub Pages of a
+private repository need a paid plan (Pro, Team or Enterprise).
 
-- [ ] Signed in as the support account: <https://sites.google.com> → **Blank site**, title "`<App>` privacy policy",
-      paste `docs/privacy-policy.md` (contact filled in) → **Publish** → a neutral address → check it in a private
-      window. Keep it in step with the file.
+- [ ] Fill in the policy's contact (the address of 5a) and push it to `main`. Check: **Actions → CI →** that run →
+      "Privacy policy page" passed, and the repository has a `gh-pages` branch.
+- [ ] **Settings → Pages → Build and deployment → Source: Deploy from a branch → `gh-pages` / `(root)` → Save**; if a
+      visibility is offered, **Public**. A minute later the page is at `https://<owner>.github.io/<repo>/`: check it in
+      a private window. That address goes to the stores (steps 6 and 10); renaming the repository moves it.
+- [ ] On GitHub Free instead: leave `privacy-page` empty, and signed in as the support account,
+      <https://sites.google.com> → **Blank site**, title "`<App>` privacy policy", paste `docs/privacy-policy.md` →
+      **Publish** → a neutral address → check it in a private window. Keep it in step with the file by hand.
 
 ## 6. Google Play Console: create the app
 

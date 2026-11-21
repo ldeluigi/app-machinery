@@ -36,6 +36,9 @@ name: CI
 #   external groups the listing names, which get the release's build, its notes as What to Test, and Beta App Review.
 #   It never submits a version to App Review. A game's achievements go to Game Center, with their texts and pictures in
 #   every language. A run started by hand with `store-listing` does it too, on the default branch.
+# On every push to the default branch, when the app names its privacy policy (`privacy-page`):
+# - Privacy policy page: the policy on the `gh-pages` branch, which GitHub Pages serves as the public page the stores
+#   link to; written only when its text changed.
 #
 # The app's .github/workflows/ci.yml calls this one: see docs/02-new-app.md.
 
@@ -110,6 +113,13 @@ on:
           the store listing jobs bring up to date in Google Play Games and Game Center; an app without it has none
         type: string
         default: store/achievements.txt
+      privacy-page:
+        description: >-
+          The app's privacy policy (e.g. docs/privacy-policy.md), published as index.md on the gh-pages branch for
+          GitHub Pages to serve as the public page the stores link to (docs/02-new-app.md, step 5b); empty publishes
+          nothing
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -230,6 +240,55 @@ jobs:
           .machinery/.github/scripts/check-issue-references.sh $RANGE
       - name: Actions pinned to commit SHAs
         uses: zgosalvez/github-actions-ensure-sha-pinned-actions@76ed8a4c86957c2d27d44bab47f172193149d926 # v5.0.11
+
+  privacy-page:
+    name: Privacy policy page
+    # The privacy policy is public even when the repository is private: GitHub Pages serves the gh-pages branch, and
+    # this job puts there only the policy (as index.md), so nothing else of the repository is published. A private
+    # repository's Pages need a paid GitHub plan (docs/02-new-app.md, step 5b). It adds a commit on top of what the
+    # branch holds and never force-pushes, so it can't erase anything else kept there.
+    if: >-
+      inputs.privacy-page != '' && github.event_name != 'pull_request' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Put the policy on the gh-pages branch
+        env:
+          POLICY: ${{ inputs.privacy-page }}
+          TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ ! -f "$POLICY" ]; then
+            echo "::error::There is no $POLICY: privacy-page names the app's privacy policy"
+            exit 1
+          fi
+          policy="$PWD/$POLICY"
+          remote="https://x-access-token:$TOKEN@github.com/$REPOSITORY.git"
+          page="$RUNNER_TEMP/privacy-page"
+          git init -q -b gh-pages "$page"
+          cd "$page"
+          # The branch's last commit, when there is one: the policy's commit goes on top of it. If the branch exists
+          # but can't be read, the push below is refused instead of replacing it.
+          if git ls-remote --exit-code --heads "$remote" gh-pages > /dev/null; then
+            git fetch -q --depth 1 "$remote" gh-pages
+            git reset -q --hard FETCH_HEAD
+          fi
+          cp "$policy" index.md
+          git add index.md
+          if git diff --cached --quiet; then
+            echo "The page already shows this policy"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "docs: publish the privacy policy"
+          git push -q "$remote" gh-pages
+          echo "Published $POLICY on the gh-pages branch"
 
   build:
     name: Build and check
