@@ -22,7 +22,9 @@ name: Automation
 #   finishes an issue leaves what it did on the issue's branch, without a pull request: the next agent on the issue
 #   goes on from it (.github/scripts/agent-branch.sh), and the pull request opens once one finishes. When the last
 #   agent runs out of time too, the issue gets `needs-human`, and the answer asks the owner to split it or call an
-#   agent again: the task's size, not a failure of the automation, so the run doesn't fail over it.
+#   agent again: the task's size, not a failure of the automation, so the run doesn't fail over it. Asked to split an
+#   issue (`@claude split this issue`), an agent writes the smaller ones to a file: the bot opens them as its
+#   sub-issues and starts each once what it waits for is merged (split-issue.sh, start-waiting-issues.sh).
 # - An issue kept from the agents goes to them once nothing keeps it: when a maintainer takes its `retry next week`
 #   label off, or its last assignee (the `unassigned` event, which the app's caller must listen to) if no agent was
 #   called on it yet.
@@ -727,6 +729,7 @@ jobs:
       out-of-credit: ${{ steps.claude.outputs.out-of-credit }}
       out-of-time: ${{ steps.clock.outputs.out-of-time }}
       outcome: ${{ steps.claude.outcome }}
+      split: ${{ steps.split.outcome == 'success' }}
       commits: ${{ steps.bundle.outputs.commits }}
     steps:
       # All the history, so that `git diff origin/<base>...HEAD` shows a pull request's changes
@@ -739,7 +742,8 @@ jobs:
       - *checkout-machinery
       - &exclude-machinery
         name: Keep the machinery out of the app's commits
-        run: echo ".machinery/" >> .git/info/exclude
+        # And the issues an agent splits one into, which it writes for the publish job (split-issue.sh)
+        run: printf '%s\n' ".machinery/" "/split-issue.json" >> .git/info/exclude
       # An earlier request's commits may still be on their way to this branch: once they are there, it is read again
       - id: wait
         name: Wait for an earlier agent's commits
@@ -815,6 +819,13 @@ jobs:
               beginning`.
             - Never put an issue number in a commit message (`Closes #12`, `Fixes #12` or a bare `#12`): commit
               messages become the release notes and the stores' "What's new". The pull request closes the issue.
+            - If the task is to split the issue into smaller ones, change no code: write them to the file
+              `split-issue.json` in the repository root, which is never committed. It holds a JSON array of 2 to 10
+              objects, in the order they should be done, each with `title`, `body` (Markdown: what to do and how to
+              check it, small enough for one agent's run of an hour, and never an issue number of the new ones) and
+              `after` (the indexes, from 0, of the new issues it must wait for, `[]` when it can start at once). The
+              workflow opens them as sub-issues of this one, starts each one once what it waits for is merged, and
+              closes this one when all of them are done.
             - End with a short summary of what you changed, or of what the owner must do: the workflow posts it as
               a comment.
       # The step's limit stops Claude without a reason, as a start that failed does: having run its whole hour tells them
@@ -839,6 +850,16 @@ jobs:
           start: ${{ steps.start.outputs.sha }}
           name: commits-claude
           unfinished: ${{ steps.claude.outputs.done != 'true' && 'Claude' || '' }}
+      # Asked to split the issue, Claude wrote the smaller ones to a file: data for the publish job, which opens them
+      - name: Hand the split over
+        id: split
+        if: steps.claude.outputs.done == 'true' && hashFiles('split-issue.json') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: split-claude
+          path: split-issue.json
+          if-no-files-found: error
+          retention-days: 1
 
   issue-claude-publish:
     name: "Claude: publish"
@@ -890,12 +911,36 @@ jobs:
           artifact: commits-claude
           branch: ${{ needs.issue-claude-start.outputs.branch }}
           new-branch: ${{ needs.issue-claude-start.outputs.continued != 'true' }}
+      # Asked to split an issue, Claude wrote the smaller ones: they are opened here, as the bot, as its sub-issues
+      # (split-issue.sh checks them first)
+      - name: Fetch the issues Claude split this one into
+        if: &split-claude >-
+          needs.issue-claude.outputs.done == 'true' && needs.issue-claude.outputs.split == 'true' &&
+          github.event.issue.number != '' && !github.event.issue.pull_request
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: split-claude
+          path: ${{ runner.temp }}/split
+      - name: Open the issues Claude split this one into
+        id: split
+        if: *split-claude
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          delimiter="EOF-$(openssl rand -hex 8)"
+          opened="$(.machinery/.github/scripts/split-issue.sh "$ISSUE" "$RUNNER_TEMP/split/split-issue.json" Claude)"
+          printf 'issues<<%s\n%s\n%s\n' "$delimiter" "$opened" "$delimiter" >> "$GITHUB_OUTPUT"
       # Given an issue, Claude commits nothing only when the issue needs the owner, as its answer says: the label shows
       # it, and keeps the agents off it
       - name: Mark the issue for the owner
         if: >-
           needs.issue-claude.outputs.done == 'true' && steps.push.outputs.pushed != 'true' &&
-          needs.issue-claude-start.outputs.new == 'true' && github.event_name == 'issues'
+          needs.issue-claude-start.outputs.new == 'true' && github.event_name == 'issues' &&
+          needs.issue-claude.outputs.split != 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -922,6 +967,8 @@ jobs:
           KEPT: ${{ steps.keep.outputs.pushed }}
           BRANCH: ${{ needs.issue-claude-start.outputs.branch }}
           OUT_OF_TIME: ${{ needs.issue-claude.outputs.out-of-time }}
+          SPLIT: ${{ steps.split.outputs.issues }}
+          SPLIT_OUTCOME: ${{ steps.split.outcome }}
           # The last agent on the issue: no Copilot to hand it over to
           LAST: ${{ github.event_name == 'issues' && secrets.COPILOT_GITHUB_TOKEN == '' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -935,6 +982,12 @@ jobs:
             body="$(printf '%s\n\n— Claude, in [this run](%s)%s' "$RESPONSE" "$RUN_URL" "${PULL_REQUEST:+: $PULL_REQUEST}")"
             if [ "$PUSHED" = "failure" ]; then
               body="$(printf '%s\n\nIts commits could not be pushed: see the run.' "$body")"
+            fi
+            if [ -n "$SPLIT" ]; then
+              body="$(printf '%s\n\nSplit into:\n- %s' "$body" "${SPLIT//$'\n'/$'\n'- }")"
+            fi
+            if [ "$SPLIT_OUTCOME" = "failure" ]; then
+              body="$(printf '%s\n\n%s' "$body" "Its split couldn't be opened: see the run.")"
             fi
           elif [ -n "$WHY" ]; then
             # "encountered an error", as Copilot's: take-agents-off.sh deletes these comments when the issue waits
@@ -1045,6 +1098,7 @@ jobs:
       out-of-credit: ${{ steps.copilot.outputs.out-of-credit }}
       out-of-time: ${{ steps.copilot.outputs.out-of-time }}
       outcome: ${{ steps.copilot.outcome }}
+      split: ${{ steps.split.outcome == 'success' }}
       commits: ${{ steps.bundle.outputs.commits }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1107,6 +1161,16 @@ jobs:
           start: ${{ steps.start.outputs.sha }}
           name: commits-copilot
           unfinished: ${{ steps.copilot.outputs.done != 'true' && 'Copilot' || '' }}
+      # Asked to split the issue, Copilot wrote the smaller ones to a file: data for the publish job, which opens them
+      - name: Hand the split over
+        id: split
+        if: steps.copilot.outputs.done == 'true' && hashFiles('split-issue.json') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: split-copilot
+          path: split-issue.json
+          if-no-files-found: error
+          retention-days: 1
 
   issue-copilot-publish:
     name: "Copilot: publish"
@@ -1157,12 +1221,36 @@ jobs:
           artifact: commits-copilot
           branch: ${{ needs.issue-copilot-start.outputs.branch }}
           new-branch: ${{ needs.issue-copilot-start.outputs.continued != 'true' }}
+      # Asked to split an issue, Copilot wrote the smaller ones: they are opened here, as the bot, as its sub-issues
+      # (split-issue.sh checks them first)
+      - name: Fetch the issues Copilot split this one into
+        if: &split-copilot >-
+          needs.issue-copilot.outputs.done == 'true' && needs.issue-copilot.outputs.split == 'true' &&
+          github.event.issue.number != '' && !github.event.issue.pull_request
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: split-copilot
+          path: ${{ runner.temp }}/split
+      - name: Open the issues Copilot split this one into
+        id: split
+        if: *split-copilot
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          delimiter="EOF-$(openssl rand -hex 8)"
+          opened="$(.machinery/.github/scripts/split-issue.sh "$ISSUE" "$RUNNER_TEMP/split/split-issue.json" Copilot)"
+          printf 'issues<<%s\n%s\n%s\n' "$delimiter" "$opened" "$delimiter" >> "$GITHUB_OUTPUT"
       # Given an issue, Copilot commits nothing only when the issue needs the owner, as its answer says: the label shows
       # it, and keeps the agents off it
       - name: Mark the issue for the owner
         if: >-
           needs.issue-copilot.outputs.done == 'true' && steps.push.outputs.pushed != 'true' &&
-          needs.issue-copilot-start.outputs.new == 'true' && github.event_name == 'issues'
+          needs.issue-copilot-start.outputs.new == 'true' && github.event_name == 'issues' &&
+          needs.issue-copilot.outputs.split != 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -1189,6 +1277,8 @@ jobs:
           PUSHED: ${{ steps.push.outcome }}
           KEPT: ${{ steps.keep.outputs.pushed }}
           BRANCH: ${{ needs.issue-copilot-start.outputs.branch }}
+          SPLIT: ${{ steps.split.outputs.issues }}
+          SPLIT_OUTCOME: ${{ steps.split.outcome }}
           # On an issue, Copilot is the last agent: out of time, the issue needs the owner
           ASK_OWNER: ${{ github.event_name == 'issues' && needs.issue-copilot.outputs.out-of-time == 'true' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -1197,6 +1287,12 @@ jobs:
             body="$(printf '%s\n\n— Copilot, in [this run](%s)%s' "$RESPONSE" "$RUN_URL" "${PULL_REQUEST:+: $PULL_REQUEST}")"
             if [ "$PUSHED" = "failure" ]; then
               body="$(printf '%s\n\nIts commits could not be pushed: see the run.' "$body")"
+            fi
+            if [ -n "$SPLIT" ]; then
+              body="$(printf '%s\n\nSplit into:\n- %s' "$body" "${SPLIT//$'\n'/$'\n'- }")"
+            fi
+            if [ "$SPLIT_OUTCOME" = "failure" ]; then
+              body="$(printf '%s\n\n%s' "$body" "Its split couldn't be opened: see the run.")"
             fi
           else
             # Without a reason, Copilot's job ended before it could give one
@@ -1247,6 +1343,36 @@ jobs:
         run: |
           echo "Copilot couldn't finish: ${WHY:-see the Copilot job}"
           exit 1
+
+  waiting-issues:
+    name: Start the waiting issues
+    # A merged pull request may end what the issues a split left waiting wait for (split-issue.sh): they start, and a
+    # split issue whose parts are all done closes (start-waiting-issues.sh). Nothing of the pull request runs here: of
+    # it, only its description is read, for the issues it closes
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - *find-machinery
+      - *checkout-machinery
+      - *publish-token
+      - name: Start the issues whose wait is over
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          BOT: ${{ vars.GH_APP_LOGIN }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # "Closes #12", "fixes #12", "resolved #12": the issues GitHub closes with the merge
+          closed="$(grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+' <<< "$BODY" | grep -oE '[0-9]+' | sort -u | paste -sd ' ' - || true)"
+          if [ -z "$closed" ]; then
+            echo "The pull request closes no issue."
+            exit 0
+          fi
+          read -ra numbers <<< "$closed"
+          .machinery/.github/scripts/start-waiting-issues.sh "${numbers[@]}"
 
   issue-retry:
     name: Retry

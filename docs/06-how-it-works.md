@@ -110,6 +110,13 @@ that file, so a failing licence check stays the owner's call.
   request would merge it once CI is green. When the last agent (Copilot after Claude, or Claude without Copilot) runs
   out of time too, the issue gets `needs-human`, and the answer asks the owner to split it or call an agent again:
   that is the task's size, not a failure of the automation, so it doesn't fail the run or reach Automation health.
+- **Splitting an issue never gives an agent GitHub**: asked to split one (`@claude split this issue`), the agent
+  writes the smaller issues to `split-issue.json`, which its job hands over as an artifact and never commits. The
+  publish job takes it as data: `split-issue.sh` checks its shape (2 to 10 issues, titles, bodies, and which earlier
+  ones each waits for) and opens them as the bot, as sub-issues of the original, which gets the `split` label. Those
+  that wait for none get the `claude` label, which starts Claude; the others carry a `waits-for` marker in their
+  body, and `start-waiting-issues.sh` starts them when a merged pull request closes the last of what they wait for,
+  looking only at the bot's own issues. Once all the parts are closed, it closes the original.
 - **The build gets no credentials**: an agent runs `./gradlew`, which runs the code of the app and of everything it
   depends on. Claude Code's subprocess scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) keeps Claude's and the other
   credentials out of the environment of the commands Claude runs, but for the read-only GitHub token that `gh` needs.

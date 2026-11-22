@@ -7,7 +7,9 @@
 # - timed-out.sh tells the jobs GitHub stopped at their time limit from the ones a newer run or a person cancelled;
 # - save-unfinished-work.sh commits what an agent that stopped left uncommitted, but what it may not change;
 # - pull-request-title.sh names a pull request by its branch's first commit that isn't such a save;
-# - agent-branch.sh goes on from an issue's branch left unfinished, and starts a new one otherwise.
+# - agent-branch.sh goes on from an issue's branch left unfinished, and starts a new one otherwise;
+# - split-issue.sh opens the issues an agent split one into, as sub-issues, and starts the ones that wait for none;
+# - start-waiting-issues.sh starts the others once what they wait for is merged, and closes a split issue when done.
 # Usage: test-scripts.sh
 set -euo pipefail
 
@@ -248,6 +250,135 @@ expect_branch continued agent/issue-12-20261121-2222 agent/issue-12-20261121-222
 expect_branch new agent/issue-12-2 "agent/issue-12-20261121-2222|7"
 expect_branch continued agent/issue-12-20261122-0041 "agent/issue-12-20261121-2222|7" agent/issue-12-20261122-0041
 expect_branch new agent/issue-12-2 agent/issue-12-20261121-2222 "agent/issue-12-20261122-0041|8"
+
+# A gh that answers `gh api <path>` from $FIXTURES/<path, without its query, "/" made "_">.json through the call's own
+# --jq, opens issues numbered from 101, and writes every other call, and each call that changes something, to calls
+cat > "$work/bin/gh" << 'GH'
+#!/usr/bin/env bash
+if [ "$1" = "api" ]; then
+  shift
+  method=GET path="" jq="" fields=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -X) method="$2" && shift 2 ;;
+      --jq) jq="$2" && shift 2 ;;
+      -F | -f) fields="$fields $2" && shift 2 ;;
+      --paginate | --silent) shift ;;
+      *) path="$1" && shift ;;
+    esac
+  done
+  if [ "$method" != "GET" ]; then
+    echo "$method $path$fields" >> "$FIXTURES/calls"
+    exit 0
+  fi
+  key="${path%%\?*}"
+  [ -f "$FIXTURES/${key//\//_}.json" ] || exit 1
+  jq -r "${jq:-.}" "$FIXTURES/${key//\//_}.json"
+  exit 0
+fi
+echo "$*" > "$FIXTURES/last"
+case "$1 $2" in
+  "label create") ;;
+  "issue create")
+    number="$(cat "$FIXTURES/next" 2> /dev/null || echo 101)"
+    echo $((number + 1)) > "$FIXTURES/next"
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --title) echo "$2" > "$FIXTURES/title-$number" && shift 2 ;;
+        --body) echo "$2" > "$FIXTURES/body-$number" && shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    echo "{\"id\": $((number + 1000)), \"state\": \"open\"}" > "$FIXTURES/repos_owner_app_issues_$number.json"
+    echo "issue create $number" >> "$FIXTURES/calls"
+    echo "https://github.com/owner/app/issues/$number"
+    ;;
+  *) echo "$*" >> "$FIXTURES/calls" ;;
+esac
+GH
+fixtures() { rm -rf "$work/fixtures" && mkdir "$work/fixtures" && : > "$work/fixtures/calls"; }
+called() { grep -qxF "$1" "$work/fixtures/calls"; }
+run_gh() { PATH="$work/bin:$PATH" FIXTURES="$work/fixtures" GH_REPO=owner/app RUN_URL=https://run BOT='bot[bot]' "$@"; }
+expect_called() { # <what the test is about> <yes|no> <call>
+  local found=no
+  if called "$3"; then found=yes; fi
+  if [ "$found" = "yes" ] && [ "$2" = "no" ]; then
+    echo "::error::$1: \"$3\" was called, and shouldn't be."
+    status=1
+  elif [ "$found" = "no" ] && [ "$2" = "yes" ]; then
+    echo "::error::$1: \"$3\" wasn't called."
+    status=1
+  fi
+}
+
+# The split: three issues, the second waiting for the first, the third for both
+fixtures
+cat > "$work/split.json" << 'JSON'
+[
+  {"title": "Tell the Guests apart", "body": "Give each Guest an id.", "after": []},
+  {"title": "Name every phone", "body": "The roster.", "after": [0]},
+  {"title": "Pause everyone", "body": "The link loss.", "after": [0, 1]}
+]
+JSON
+if ! printed="$(run_gh "$scripts/split-issue.sh" 50 "$work/split.json" Claude)"; then
+  echo "::error::split-issue.sh refused a list it should take."
+  status=1
+fi
+[ "$printed" = "$(printf '#101 Tell the Guests apart\n#102 Name every phone\n#103 Pause everyone')" ] ||
+  { echo "::error::split-issue.sh printed \"$printed\"."; status=1; }
+expect_called "split-issue.sh" yes "issue create 103"
+expect_called "split-issue.sh" yes "POST repos/owner/app/issues/50/sub_issues sub_issue_id=1101"
+expect_called "split-issue.sh" yes "POST repos/owner/app/issues/50/sub_issues sub_issue_id=1103"
+expect_called "split-issue.sh" yes "issue edit 50 --add-label split"
+expect_called "split-issue.sh, the first one starts" yes "issue edit 101 --add-label claude"
+expect_called "split-issue.sh, the second one waits" no "issue edit 102 --add-label claude"
+if ! grep -qxF "<!-- waits-for: 101 102 -->" "$work/fixtures/body-103" ||
+  ! grep -qF "It starts once #101, #102 merged." "$work/fixtures/body-103" ||
+  grep -qF "waits-for" "$work/fixtures/body-101" || ! grep -qF "Part of #50" "$work/fixtures/body-101"; then
+  echo "::error::split-issue.sh doesn't write what each issue waits for, or what it is part of."
+  status=1
+fi
+for bad in '[{"title": "Alone", "body": "x", "after": []}]' \
+  '[{"title": "A", "body": "x", "after": [1]}, {"title": "B", "body": "y", "after": []}]' \
+  '[{"title": "A", "body": "x"}, {"title": "", "body": "y"}]' '{"title": "A"}' 'not json'; do
+  fixtures
+  echo "$bad" > "$work/split.json"
+  if run_gh "$scripts/split-issue.sh" 50 "$work/split.json" Claude > /dev/null 2>&1 || called "issue create 101"; then
+    echo "::error::split-issue.sh took a list it should refuse: $bad"
+    status=1
+  fi
+done
+
+# A pull request closed #101: of the issues waiting, only those whose every wait is over start
+fixtures
+cat > "$work/fixtures/repos_owner_app_issues.json" << 'JSON'
+[
+  {"number": 102, "body": "x\n<!-- waits-for: 101 -->", "labels": []},
+  {"number": 103, "body": "x\n<!-- waits-for: 101 104 -->", "labels": []},
+  {"number": 105, "body": "x\n<!-- waits-for: 101 -->", "labels": [{"name": "claude"}]},
+  {"number": 106, "body": "no marker", "labels": []},
+  {"number": 107, "body": "x\n<!-- waits-for: 101 108 -->", "labels": []},
+  {"number": 109, "body": "x\n<!-- waits-for: 101 -->", "labels": [], "pull_request": {}}
+]
+JSON
+echo '{"state": "open"}' > "$work/fixtures/repos_owner_app_issues_104.json"
+echo '{"state": "closed"}' > "$work/fixtures/repos_owner_app_issues_108.json"
+echo '{"number": 50, "state": "open", "labels": [{"name": "split"}]}' > "$work/fixtures/repos_owner_app_issues_101_parent.json"
+echo '[{"number": 101, "state": "open"}, {"number": 102, "state": "open"}]' > "$work/fixtures/repos_owner_app_issues_50_sub_issues.json"
+run_gh "$scripts/start-waiting-issues.sh" 101 > /dev/null
+expect_called "start-waiting-issues.sh, all it waits for is done" yes "issue edit 102 --add-label claude"
+expect_called "start-waiting-issues.sh, one more is closed already" yes "issue edit 107 --add-label claude"
+expect_called "start-waiting-issues.sh, still waiting" no "issue edit 103 --add-label claude"
+expect_called "start-waiting-issues.sh, an agent has it" no "issue edit 105 --add-label claude"
+expect_called "start-waiting-issues.sh, not waiting" no "issue edit 106 --add-label claude"
+expect_called "start-waiting-issues.sh, a pull request" no "issue edit 109 --add-label claude"
+expect_called "start-waiting-issues.sh, a part still open" no "issue close 50 --reason completed"
+echo '[{"number": 101, "state": "open"}, {"number": 102, "state": "closed"}]' > "$work/fixtures/repos_owner_app_issues_50_sub_issues.json"
+run_gh "$scripts/start-waiting-issues.sh" 101 > /dev/null
+expect_called "start-waiting-issues.sh, every part done" yes "issue close 50 --reason completed"
+fixtures
+run_gh "$scripts/start-waiting-issues.sh" 101 > /dev/null 2>&1 ||
+  { echo "::error::start-waiting-issues.sh fails when nothing waits and #101 has no parent."; status=1; }
 
 [ "$status" -ne 0 ] || echo "The scripts pass their tests."
 exit $status
