@@ -611,8 +611,11 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: .machinery/tools/release/build/install/release/bin/release
+      # Only for the Play upload of this run, which takes it minutes later: an app without a Play track never reads it,
+      # and a day covers the automation's one re-run of a failed job. A bundle is tens of megabytes, which the
+      # account's Actions storage would otherwise hold for every release
       - name: Keep the bundle for the Play upload
-        if: steps.semantic.outputs.new_release_published == 'true'
+        if: steps.semantic.outputs.new_release_published == 'true' && vars.PLAY_TRACK != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-bundle
@@ -620,15 +623,15 @@ jobs:
             ${{ inputs.android-app }}/build/outputs/bundle/release/${{ inputs.android-app }}-release.aab
             ${{ inputs.android-app }}/build/outputs/mapping/release/mapping.txt
             whatsnew/
-          retention-days: 30
-      # The notes alone, for TestFlight's What to Test
+          retention-days: 1
+      # The notes alone, for TestFlight's What to Test in this run
       - name: Keep the notes for TestFlight
         if: steps.semantic.outputs.new_release_published == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-notes
           path: whatsnew/
-          retention-days: 30
+          retention-days: 1
 
   play:
     name: Upload to Google Play
