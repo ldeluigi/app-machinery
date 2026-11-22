@@ -18,7 +18,9 @@ name: Automation
 #   call none. It says it's on it in a comment, which becomes its answer, commits to an `agent/issue-...` branch, and
 #   the bot opens the pull request, which merges by itself once CI is green. The `copilot` label, `@copilot ...`, or
 #   Claude being unable (no credential, usage limit, error, out of time) hands the issue to the Copilot CLI, which works
-#   the same way. An issue the agents ran out of credit for gets `retry next week`.
+#   the same way. An issue the agents ran out of credit for gets `retry next week`. An agent that stops before it
+#   finishes an issue leaves what it did on the issue's branch, without a pull request: the next agent on the issue
+#   goes on from it (.github/scripts/agent-branch.sh), and the pull request opens once one finishes.
 # - An issue kept from the agents goes to them once nothing keeps it: when a maintainer takes its `retry next week`
 #   label off, or its last assignee (the `unassigned` event, which the app's caller must listen to) if no agent was
 #   called on it yet.
@@ -598,11 +600,24 @@ jobs:
       ref: ${{ steps.branch.outputs.ref }}
       base: ${{ steps.branch.outputs.base }}
       new: ${{ steps.branch.outputs.new }}
+      continued: ${{ steps.branch.outputs.continued }}
       thread: ${{ steps.thread.outputs.text }}
       task: ${{ steps.task.outputs.text }}
       comment: ${{ steps.comment.outputs.id }}
     steps:
-      # Asked on a pull request, the agent works on its branch; given an issue, on a new one
+      # Of the app, only the file that names the JDK, as the default branch has it: the machinery's own tool reads the
+      # conversation, and none of the app's code is built here
+      - &checkout-java-version
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .java-version
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - *find-machinery
+      - *checkout-machinery
+      # Asked on a pull request, the agent works on its branch. Given an issue, on the branch an earlier agent left
+      # unfinished, when there is one (agent-branch.sh), to go on from it; else on a new one
       - &choose-branch
         name: Choose the branch
         id: branch
@@ -614,7 +629,17 @@ jobs:
           BASE: ${{ github.event.repository.default_branch }}
         run: |
           if [ -z "$PR" ]; then
-            { echo "name=agent/issue-$ISSUE-$(date -u +%Y%m%d-%H%M)"; echo "ref=$BASE"; echo "base=$BASE"; echo "new=true"; } >> "$GITHUB_OUTPUT"
+            { read -r name; read -r how; } < <(.machinery/.github/scripts/agent-branch.sh "$ISSUE")
+            if [ -z "$name" ]; then
+              echo "::error::No branch could be chosen for #$ISSUE."
+              exit 1
+            elif [ "$how" = "continued" ]; then
+              echo "::notice::An earlier agent left $name unfinished: this one goes on from it."
+              { echo "name=$name"; echo "ref=$name"; echo "continued=true"; } >> "$GITHUB_OUTPUT"
+            else
+              { echo "name=$name"; echo "ref=$BASE"; } >> "$GITHUB_OUTPUT"
+            fi
+            { echo "base=$BASE"; echo "new=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # "|| true": a pull request gh can't show is reported below, not by the step ending here
@@ -628,17 +653,6 @@ jobs:
             exit 1
           fi
           { echo "name=$head"; echo "ref=$head"; echo "base=$base"; } >> "$GITHUB_OUTPUT"
-      # Of the app, only the file that names the JDK, as the default branch has it: the machinery's own tool reads the
-      # conversation, and none of the app's code is built here
-      - &checkout-java-version
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          sparse-checkout: .java-version
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - *find-machinery
-      - *checkout-machinery
       # All the agent reads of GitHub: the maintainers' posts and the others' as they stood when a maintainer last
       # called an agent, without what the page doesn't show. It fails, and no agent runs, unless the event's sender
       # is a maintainer or the bot App
@@ -655,9 +669,13 @@ jobs:
         env:
           NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           NEW: ${{ steps.branch.outputs.new }}
+          CONTINUED: ${{ steps.branch.outputs.continued }}
+          BRANCH: ${{ steps.branch.outputs.name }}
           BASE: ${{ steps.branch.outputs.base }}
         run: |
-          if [ "$NEW" = "true" ]; then
+          if [ "$CONTINUED" = "true" ]; then
+            task="Your task is issue #$NUMBER. An agent before you stopped before it finished, out of time or on an error, and what it did is on this branch, \`$BRANCH\`: \`git log origin/$BASE..HEAD\` and \`git diff origin/$BASE...HEAD\` show it, and some of it may not build yet. Go on from there: keep what is right, fix or redo the rest, and finish the issue. The pull request's title will be the subject of the branch's first commit, leaving out the commits that only saved unfinished work: when there are only those, make your first commit's subject name the whole change."
+          elif [ "$NEW" = "true" ]; then
             task="Your task is issue #$NUMBER."
           else
             task="You are on the branch of pull request #$NUMBER: \`git diff origin/$BASE...HEAD\` shows its changes."
@@ -751,8 +769,10 @@ jobs:
         env:
           BRANCH: ${{ needs.issue-claude-start.outputs.branch }}
           NEW: ${{ needs.issue-claude-start.outputs.new }}
+          CONTINUED: ${{ needs.issue-claude-start.outputs.continued }}
         run: |
-          if [ "$NEW" = "true" ]; then
+          # The branch an earlier agent left unfinished is checked out already
+          if [ "$NEW" = "true" ] && [ "$CONTINUED" != "true" ]; then
             git switch -c "$BRANCH"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -794,13 +814,16 @@ jobs:
               messages become the release notes and the stores' "What's new". The pull request closes the issue.
             - End with a short summary of what you changed, or of what the owner must do: the workflow posts it as
               a comment.
+      # Also when Claude stopped before it finished an issue (out of time or credit, an error): what it did goes to
+      # its branch, for the next agent to go on from
       - name: Hand Claude's commits over
         id: bundle
-        if: steps.claude.outputs.done == 'true'
+        if: steps.claude.outputs.done == 'true' || needs.issue-claude-start.outputs.new == 'true'
         uses: ./.machinery/.github/actions/bundle-commits
         with:
           start: ${{ steps.start.outputs.sha }}
           name: commits-claude
+          unfinished: ${{ steps.claude.outputs.done != 'true' && 'Claude' || '' }}
 
   issue-claude-publish:
     name: "Claude: publish"
@@ -833,10 +856,25 @@ jobs:
           artifact: commits-claude
           branch: ${{ needs.issue-claude-start.outputs.branch }}
           open-pull-request: ${{ needs.issue-claude-start.outputs.new }}
+          # An issue's branch is new, unless an earlier agent left it unfinished
+          new-branch: ${{ needs.issue-claude-start.outputs.new == 'true' && needs.issue-claude-start.outputs.continued != 'true' }}
           body: >-
             Closes #${{ github.event.issue.number }}. Claude's work on the issue, from
             [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}); it merges
             by itself once CI is green. Comment `@claude ...` to ask for changes.
+      # Claude stopped before it finished an issue: what it did goes to the issue's branch, without a pull request, and
+      # the next agent on the issue goes on from it (agent-branch.sh)
+      - name: Keep Claude's unfinished work
+        id: keep
+        if: >-
+          needs.issue-claude.outputs.done != 'true' && needs.issue-claude-start.outputs.new == 'true' &&
+          needs.issue-claude.outputs.commits != '' && needs.issue-claude.outputs.commits != '0'
+        uses: ./.machinery/.github/actions/publish-commits
+        with:
+          token: ${{ steps.token.outputs.token }}
+          artifact: commits-claude
+          branch: ${{ needs.issue-claude-start.outputs.branch }}
+          new-branch: ${{ needs.issue-claude-start.outputs.continued != 'true' }}
       # Given an issue, Claude commits nothing only when the issue needs the owner, as its answer says: the label shows
       # it, and keeps the agents off it
       - name: Mark the issue for the owner
@@ -866,6 +904,8 @@ jobs:
           STOPPED: ${{ needs.issue-claude.outputs.error == '' && (needs.issue-claude.result != 'success' || needs.issue-claude.outputs.outcome == 'failure') }}
           PULL_REQUEST: ${{ steps.push.outputs.pull-request }}
           PUSHED: ${{ steps.push.outcome }}
+          KEPT: ${{ steps.keep.outputs.pushed }}
+          BRANCH: ${{ needs.issue-claude-start.outputs.branch }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$STOPPED" = "true" ]; then
@@ -882,6 +922,9 @@ jobs:
           else
             gh api -X DELETE "repos/$GH_REPO/issues/comments/$COMMENT" --silent
             exit 0
+          fi
+          if [ "$KEPT" = "true" ]; then
+            body="$(printf '%s\n\n%s' "$body" "What it did is on the branch \`$BRANCH\`: the next agent on the issue goes on from it.")"
           fi
           gh api -X PATCH "repos/$GH_REPO/issues/comments/$COMMENT" --silent -f body="$body"
       # Claude couldn't take the issue. The copilot label, added as the bot App so that it starts the Copilot job, hands
@@ -940,13 +983,14 @@ jobs:
       ref: ${{ steps.branch.outputs.ref }}
       base: ${{ steps.branch.outputs.base }}
       new: ${{ steps.branch.outputs.new }}
+      continued: ${{ steps.branch.outputs.continued }}
       thread: ${{ steps.thread.outputs.text }}
       task: ${{ steps.task.outputs.text }}
     steps:
-      - *choose-branch
       - *checkout-java-version
       - *find-machinery
       - *checkout-machinery
+      - *choose-branch
       - *thread
       - *task
 
@@ -1005,10 +1049,12 @@ jobs:
         env:
           BRANCH: ${{ needs.issue-copilot-start.outputs.branch }}
           NEW: ${{ needs.issue-copilot-start.outputs.new }}
+          CONTINUED: ${{ needs.issue-copilot-start.outputs.continued }}
         run: |
           git config user.name "Copilot"
           git config user.email "198982749+Copilot@users.noreply.github.com"
-          if [ "$NEW" = "true" ]; then
+          # The branch an earlier agent left unfinished is checked out already
+          if [ "$NEW" = "true" ] && [ "$CONTINUED" != "true" ]; then
             git switch -c "$BRANCH"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -1020,13 +1066,16 @@ jobs:
         with:
           copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           prompt: *issue-prompt
+      # Also when Copilot stopped before it finished an issue (out of time or credit, an error): what it did goes to
+      # its branch, for the next agent to go on from
       - name: Hand Copilot's commits over
         id: bundle
-        if: steps.copilot.outputs.done == 'true'
+        if: steps.copilot.outputs.done == 'true' || needs.issue-copilot-start.outputs.new == 'true'
         uses: ./.machinery/.github/actions/bundle-commits
         with:
           start: ${{ steps.start.outputs.sha }}
           name: commits-copilot
+          unfinished: ${{ steps.copilot.outputs.done != 'true' && 'Copilot' || '' }}
 
   issue-copilot-publish:
     name: "Copilot: publish"
@@ -1058,10 +1107,25 @@ jobs:
           artifact: commits-copilot
           branch: ${{ needs.issue-copilot-start.outputs.branch }}
           open-pull-request: ${{ needs.issue-copilot-start.outputs.new }}
+          # An issue's branch is new, unless an earlier agent left it unfinished
+          new-branch: ${{ needs.issue-copilot-start.outputs.new == 'true' && needs.issue-copilot-start.outputs.continued != 'true' }}
           body: >-
             Closes #${{ github.event.issue.number }}. Copilot's work on the issue, from
             [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}); it merges
             by itself once CI is green. Comment `@copilot ...` to ask for changes.
+      # Copilot stopped before it finished an issue: what it did goes to the issue's branch, without a pull request, and
+      # the next agent on the issue goes on from it (agent-branch.sh)
+      - name: Keep Copilot's unfinished work
+        id: keep
+        if: >-
+          needs.issue-copilot.outputs.done != 'true' && needs.issue-copilot-start.outputs.new == 'true' &&
+          needs.issue-copilot.outputs.commits != '' && needs.issue-copilot.outputs.commits != '0'
+        uses: ./.machinery/.github/actions/publish-commits
+        with:
+          token: ${{ steps.token.outputs.token }}
+          artifact: commits-copilot
+          branch: ${{ needs.issue-copilot-start.outputs.branch }}
+          new-branch: ${{ needs.issue-copilot-start.outputs.continued != 'true' }}
       # Given an issue, Copilot commits nothing only when the issue needs the owner, as its answer says: the label shows
       # it, and keeps the agents off it
       - name: Mark the issue for the owner
@@ -1092,6 +1156,8 @@ jobs:
           WHY: ${{ needs.issue-copilot.outputs.error }}
           PULL_REQUEST: ${{ steps.push.outputs.pull-request }}
           PUSHED: ${{ steps.push.outcome }}
+          KEPT: ${{ steps.keep.outputs.pushed }}
+          BRANCH: ${{ needs.issue-copilot-start.outputs.branch }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$DONE" = "true" ]; then
@@ -1104,6 +1170,9 @@ jobs:
             [ -n "$WHY" ] || WHY="its job stopped before it finished: see the run."
             # "encountered an error", as Claude's: take-agents-off.sh deletes these comments when the issue waits
             body="$(printf 'Copilot encountered an error in [this run](%s): %s' "$RUN_URL" "$WHY")"
+            if [ "$KEPT" = "true" ]; then
+              body="$(printf '%s\n\n%s' "$body" "What it did is on the branch \`$BRANCH\`: the next agent on the issue goes on from it.")"
+            fi
           fi
           gh issue comment "$NUMBER" --body "$body"
       # Given an issue it couldn't finish (no token, no credit, error), the label comes off, with Copilot, so that adding
