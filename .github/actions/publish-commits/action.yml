@@ -1,7 +1,8 @@
 name: Publish commits
 description: >-
-  Pushes the commits an AI agent made to `branch` as the bot App and, for a new branch, opens the pull request: titled
-  by the first commit's subject (the agents write it to name the whole change), labelled, and with `body`. The commits
+  Pushes the commits an AI agent made to `branch` as the bot App and, when asked, opens the pull request: titled by
+  the branch's first commit's subject (the agents write it to name the whole change, and the commits that only saved
+  an agent's unfinished work don't count), labelled, and with `body`. The commits
   come from the agent's job as a bundle (`artifact`, from .github/actions/bundle-commits): this action runs in a job
   where no agent and none of its builds ran, fetches them without checking them out, and works out by itself, in a
   fresh checkout of the branch the agent started from, what they add. The bot App token has no Workflows permission, so
@@ -20,9 +21,13 @@ inputs:
     required: true
   open-pull-request:
     description: >-
-      "true" for a new branch of the agent's own, from which a pull request is opened into the default branch; else
-      the branch exists, and the commits must follow it
+      "true" to open a pull request from the branch into the default branch, for an agent's branch that has none yet
     default: "false"
+  new-branch:
+    description: >-
+      "true" for a new branch of the agent's own, made from the default branch; "false" when the branch exists and the
+      commits must follow it. Empty: the branch is new exactly when a pull request is opened (`open-pull-request`)
+    default: ""
   labels:
     description: The pull request's labels, comma-separated (created when missing)
     default: agent,automerge
@@ -56,6 +61,7 @@ runs:
         GH_REPO: ${{ github.repository }}
         BRANCH: ${{ inputs.branch }}
         OPEN: ${{ inputs.open-pull-request }}
+        NEW_BRANCH: ${{ inputs.new-branch }}
         LABELS: ${{ inputs.labels }}
         BODY: ${{ inputs.body }}
         BASE: ${{ github.event.repository.default_branch }}
@@ -67,7 +73,9 @@ runs:
         git -c fetch.fsckObjects=true fetch --quiet --no-tags "$RUNNER_TEMP/agent-commits/commits.bundle" HEAD
         tip="$(git rev-parse FETCH_HEAD)"
         kind=existing
-        [ "$OPEN" != "true" ] || kind=new
+        if [ "$NEW_BRANCH" = "true" ] || { [ -z "$NEW_BRANCH" ] && [ "$OPEN" = "true" ]; }; then
+          kind=new
+        fi
         read -ra protected <<< "$PROTECTED"
         start="$("$SCRIPTS/check-agent-commits.sh" "$tip" "$kind" "${protected[@]}")"
         if [ -z "$start" ]; then
@@ -79,7 +87,7 @@ runs:
         # the bot. The agent's commits are replayed on it, the same changes, without running anything of theirs;
         # when they don't apply as they are, they go as they were made.
         now="$(git rev-parse HEAD)"
-        if [ "$OPEN" = "true" ] && [ "$now" != "$start" ]; then
+        if [ "$kind" = "new" ] && [ "$now" != "$start" ]; then
           if git -c core.hooksPath=/dev/null -c user.name="github-actions[bot]" \
             -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             rebase --quiet --onto "$now" "$start" "$tip" > /dev/null 2>&1; then
@@ -99,16 +107,8 @@ runs:
         git -c core.hooksPath=/dev/null push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$tip:refs/heads/$BRANCH"
         echo "pushed=true" >> "$GITHUB_OUTPUT"
         if [ "$OPEN" = "true" ]; then
-          # Not a pipe into head: under pipefail, head ending early fails the step when there are many commits
-          title="$(git log --reverse --format=%s "$start..$tip" | sed -n 1p)"
-          args=()
-          IFS=',' read -ra names <<< "$LABELS"
-          for name in "${names[@]}"; do
-            name="$(echo "$name" | xargs)"
-            [ -n "$name" ] || continue
-            gh label create "$name" > /dev/null 2>&1 || true
-            args+=(--label "$name")
-          done
-          url="$(gh pr create --base "$BASE" --head "$BRANCH" --title "$title" --body "$BODY" "${args[@]}")"
+          # The whole branch, with the commits an earlier agent left on it unfinished: its first commit names the change
+          from="$(git merge-base "origin/$BASE" "$tip")"
+          url="$("$SCRIPTS/open-agent-pull-request.sh" "$BRANCH" "$from" "$tip")"
           echo "pull-request=$url" >> "$GITHUB_OUTPUT"
         fi

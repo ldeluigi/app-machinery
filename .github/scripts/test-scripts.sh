@@ -4,7 +4,10 @@
 #   error (a failure of the automation);
 # - check-agent-commits.sh lets through only commits that follow the branch and leave the agents' settings alone;
 # - wait-for-publish.sh waits for another run's agent exactly while its commits are still to be published;
-# - timed-out.sh tells the jobs GitHub stopped at their time limit from the ones a newer run or a person cancelled.
+# - timed-out.sh tells the jobs GitHub stopped at their time limit from the ones a newer run or a person cancelled;
+# - save-unfinished-work.sh commits what an agent that stopped left uncommitted, but what it may not change;
+# - pull-request-title.sh names a pull request by its branch's first commit that isn't such a save;
+# - agent-branch.sh goes on from an issue's branch left unfinished, and starts a new one otherwise.
 # Usage: test-scripts.sh
 set -euo pipefail
 
@@ -161,6 +164,90 @@ expect_timed_out "12" "11|The operation was canceled." "12|The job has exceeded 
 expect_timed_out "11 12" "11|The job has exceeded the maximum execution time of 45m0s" \
   "12|The job has exceeded the maximum execution time of 60m0s"
 expect_timed_out ""
+
+# An agent that stopped before it finished: what it left uncommitted is saved, but for what it may not change
+git -c core.autocrlf=false clone --quiet "$work/origin" "$work/unfinished"
+started="$(repo "$work/unfinished" rev-parse HEAD)"
+echo "half done" > "$work/unfinished/app.txt"
+echo "new" > "$work/unfinished/new.txt"
+echo '{"allow":["*"]}' > "$work/unfinished/.claude/settings.json"
+mkdir -p "$work/unfinished/.github/workflows" "$work/unfinished/.machinery"
+echo "on: push" > "$work/unfinished/.github/workflows/ci.yml"
+echo "machinery" > "$work/unfinished/.machinery/tool"
+(cd "$work/unfinished" && "$scripts/save-unfinished-work.sh" Claude "${protected[@]}" > /dev/null)
+saved="$(repo "$work/unfinished" show --name-only --format= HEAD | sort | paste -sd ' ' -)"
+if [ "$(repo "$work/unfinished" rev-list --count "$started..HEAD")" != "1" ] || [ "$saved" != "app.txt new.txt" ]; then
+  echo "::error::save-unfinished-work.sh saved \"$saved\": it should save app.txt and new.txt alone, in one commit."
+  status=1
+fi
+if [ "$(repo "$work/unfinished" log -1 --format='%(trailers:key=Unfinished-Work,valueonly,separator=%x2C)')" != "Claude" ]; then
+  echo "::error::save-unfinished-work.sh doesn't mark its commit with Unfinished-Work: Claude."
+  status=1
+fi
+git -C "$work/unfinished" checkout --quiet -- .claude/settings.json
+rm -rf "$work/unfinished/.github" "$work/unfinished/.machinery"
+(cd "$work/unfinished" && "$scripts/save-unfinished-work.sh" Copilot "${protected[@]}" > /dev/null)
+if [ "$(repo "$work/unfinished" rev-list --count "$started..HEAD")" != "1" ]; then
+  echo "::error::save-unfinished-work.sh made a commit when nothing was left uncommitted."
+  status=1
+fi
+
+# The pull request's title: the branch's first commit, leaving out the ones that saved unfinished work
+expect_title() { # <title> <each commit's subject, "saved" before the ones that saved unfinished work>...
+  local dir="$work/title-$RANDOM" subject found
+  git -c core.autocrlf=false clone --quiet "$work/origin" "$dir"
+  started="$(repo "$dir" rev-parse HEAD)"
+  for subject in "${@:2}"; do
+    echo "$subject" >> "$dir/app.txt"
+    repo "$dir" add -A
+    if [ "${subject#saved }" != "$subject" ]; then
+      repo "$dir" commit --quiet -m "${subject#saved }" -m "Unfinished-Work: Claude"
+    else
+      repo "$dir" commit --quiet -m "$subject"
+    fi
+  done
+  found="$(cd "$dir" && "$scripts/pull-request-title.sh" "$started" HEAD)"
+  if [ "$found" != "$1" ]; then
+    echo "::error::pull-request-title.sh names the branch \"$found\", not \"$1\", for: ${*:2}"
+    status=1
+  fi
+}
+
+expect_title "feat(game): replay the song" "feat(game): replay the song" "fix: a test"
+expect_title "feat(game): replay the song" "saved chore: save the work Claude left unfinished" \
+  "feat(game): replay the song" "fix: a test"
+expect_title "chore: save the work Claude left unfinished" "saved chore: save the work Claude left unfinished"
+
+# The branch for an issue, with a gh that answers what the script asks: the issue's branches, then each one's pull
+# requests
+cat > "$work/bin/gh" << 'GH'
+#!/usr/bin/env bash
+case "$2" in
+  */git/matching-refs/*) cat "$BRANCHES" ;;
+  */pulls\?*) branch="${2#*head=owner:}" && grep -cxF "${branch%%&*}" "$WITH_PULLS" || true ;;
+esac
+GH
+expect_branch() { # <continued|new> <the branch it continues, or the start of the new one's name> <the issue's branches,
+  # each "name" or "name|pull request">...
+  local entry found how
+  : > "$work/branches" && : > "$work/with-pulls"
+  for entry in "${@:3}"; do
+    echo "${entry%%|*}" >> "$work/branches"
+    [ "${entry#*|}" = "$entry" ] || echo "${entry%%|*}" >> "$work/with-pulls"
+  done
+  { read -r found; read -r how; } < <(PATH="$work/bin:$PATH" BRANCHES="$work/branches" WITH_PULLS="$work/with-pulls" \
+    GH_REPO=owner/app "$scripts/agent-branch.sh" 12)
+  if [ "$how" != "$1" ] || [ "${found#"$2"}" = "$found" ]; then
+    echo "::error::agent-branch.sh gives $how branch $found for the branches: ${*:3}. It should be $1, $2."
+    status=1
+  fi
+}
+
+expect_branch new agent/issue-12-2
+expect_branch continued agent/issue-12-20261121-2222 agent/issue-12-20261121-2222
+expect_branch new agent/issue-12-2 "agent/issue-12-20261121-2222|7"
+expect_branch continued agent/issue-12-20261122-0041 "agent/issue-12-20261121-2222|7" agent/issue-12-20261122-0041
+expect_branch new agent/issue-12-2 agent/issue-12-20261121-2222 "agent/issue-12-20261122-0041|8"
 
 [ "$status" -ne 0 ] || echo "The scripts pass their tests."
 exit $status

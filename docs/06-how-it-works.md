@@ -99,6 +99,15 @@ that file, so a failing licence check stays the owner's call.
 - **A second request waits for the first one's commits**: jobs queue, not runs, so a request on the same branch could
   start while the first one's publish job is still on its way. `wait-for-publish` holds the agent until then, and the
   branch is read again.
+- **An agent that stops before it finishes leaves its work for the next**: an agent has an hour, and may run out of
+  it, or of credit, or fail. On an issue, its job then commits what it left uncommitted
+  (`save-unfinished-work.sh`, which leaves out `.github` and the agents' settings, and marks the commit with an
+  `Unfinished-Work` trailer), and the publish job pushes its work to the issue's `agent/issue-...` branch, checked as
+  any agent's commits, without a pull request. The next agent on the issue, Copilot after Claude or either one called
+  again, goes on from that branch (`agent-branch.sh`: the issue's newest branch, when it never had a pull request),
+  and once one finishes, the pull request opens from the whole branch, titled by its first commit that isn't such a
+  save (`pull-request-title.sh`). On a pull request's branch, work that isn't finished is never pushed: the pull
+  request would merge it once CI is green.
 - **The build gets no credentials**: an agent runs `./gradlew`, which runs the code of the app and of everything it
   depends on. Claude Code's subprocess scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) keeps Claude's and the other
   credentials out of the environment of the commands Claude runs, but for the read-only GitHub token that `gh` needs.
