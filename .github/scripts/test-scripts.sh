@@ -9,7 +9,8 @@
 # - pull-request-title.sh names a pull request by its branch's first commit that isn't such a save;
 # - agent-branch.sh goes on from an issue's branch left unfinished, and starts a new one otherwise;
 # - split-issue.sh opens the issues an agent split one into, as sub-issues, and starts the ones that wait for none;
-# - start-waiting-issues.sh starts the others once what they wait for is merged, and closes a split issue when done.
+# - start-waiting-issues.sh starts the others once what they wait for is merged, and closes a split issue when done;
+# - wait-until-served.sh ends a release only once the site serves every file of its plugins.
 # Usage: test-scripts.sh
 set -euo pipefail
 
@@ -379,6 +380,30 @@ expect_called "start-waiting-issues.sh, every part done" yes "issue close 50 --r
 fixtures
 run_gh "$scripts/start-waiting-issues.sh" 101 > /dev/null 2>&1 ||
   { echo "::error::start-waiting-issues.sh fails when nothing waits and #101 has no parent."; status=1; }
+
+# A site that serves the files named in served-files, and answers "not found" for the others
+cat > "$work/bin/curl" << 'CURL'
+#!/usr/bin/env bash
+file="${*: -1}"
+if grep -qxF "${file#https://site/maven/}" "$SERVED"; then echo 200; else echo 404; fi
+CURL
+chmod +x "$work/bin/curl"
+mkdir -p "$work/maven/app/machinery/plugins/1.2.0" "$work/maven/app/machinery/plugins/1.1.0"
+touch "$work/maven/app/machinery/plugins/1.2.0/plugins-1.2.0.jar" "$work/maven/app/machinery/plugins/1.2.0/plugins-1.2.0.pom"
+touch "$work/maven/app/machinery/plugins/1.1.0/plugins-1.1.0.jar"
+serve() { # <expected exit: 0 or 1> <version> <served files>...
+  local code=0
+  printf '%s\n' "${@:3}" > "$work/served"
+  PATH="$work/bin:$PATH" SERVED="$work/served" WAIT_SECONDS=0 POLL_SECONDS=0 \
+    "$scripts/wait-until-served.sh" "$work/maven" https://site/maven/ "$2" > /dev/null 2>&1 || code=$?
+  if [ "$code" -ne "$1" ]; then
+    echo "::error::wait-until-served.sh ended with $code for $2 when the site serves: ${*:3}. It should end with $1."
+    status=1
+  fi
+}
+serve 0 1.2.0 app/machinery/plugins/1.2.0/plugins-1.2.0.jar app/machinery/plugins/1.2.0/plugins-1.2.0.pom
+serve 1 1.2.0 app/machinery/plugins/1.2.0/plugins-1.2.0.jar app/machinery/plugins/1.1.0/plugins-1.1.0.jar
+serve 1 1.3.0 app/machinery/plugins/1.2.0/plugins-1.2.0.jar
 
 [ "$status" -ne 0 ] || echo "The scripts pass their tests."
 exit $status
