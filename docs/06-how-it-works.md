@@ -78,7 +78,9 @@ that file, so a failing licence check stays the owner's call.
 - **Claude first, Copilot as the fallback, both as CLIs in Actions**: GitHub's Copilot cloud agent opens draft pull
   requests that wait for approvals, and GitHub Agentic Workflows can't run Claude on a subscription.
 - **Plugins on GitHub Pages rather than Maven Central**: no Sonatype account, no signing keys; Gradle and Dependabot
-  read any Maven repository.
+  read any Maven repository. Pages serves a push some minutes later, and its CDN may keep a "not found" for ten
+  minutes, so the release's last step waits until every file of the new version is served (`wait-until-served.sh`):
+  an app moved to a version whose release run is green finds its plugins.
 - **The bot rather than the workflow token**: GitHub starts no workflow from the workflow token's pushes and merges.
 - **Agents never change workflows**: the bot's token for their commits has no Workflows permission, so an agent can't
   widen its own powers. For the same reason `publish-commits` refuses commits that change the agents' own settings

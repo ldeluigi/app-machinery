@@ -6,6 +6,7 @@ name: Self CI
 # checks with the plugins of this change. Then, on main: semantic-release tags vX.Y.Z from the Conventional Commits and
 # makes the GitHub Release, the plugins of that version join the Maven repository on the machinery's GitHub Pages
 # (the `gh-pages` branch, under maven/), next to every earlier version, and Dependabot offers the release to every app.
+# The release run ends once the site serves the new plugins.
 on:
   pull_request:
   push:
@@ -170,3 +171,11 @@ jobs:
           git add -A
           git commit -m "chore: publish the plugins $VERSION"
           git push
+      # The tag and the GitHub Release came first, but the apps get the plugins from the site, which GitHub Pages serves
+      # some minutes after the push; an app asking before then is told "not found", which its CDN may keep for ten
+      # minutes. The release is done once every file of the version is served: an app bumped after it finds them
+      - name: Wait until the site serves the plugins
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/maven
+        run: .github/scripts/wait-until-served.sh site/maven "$SITE" "$VERSION"
