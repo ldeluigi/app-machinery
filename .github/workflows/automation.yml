@@ -20,7 +20,9 @@ name: Automation
 #   Claude being unable (no credential, usage limit, error, out of time) hands the issue to the Copilot CLI, which works
 #   the same way. An issue the agents ran out of credit for gets `retry next week`. An agent that stops before it
 #   finishes an issue leaves what it did on the issue's branch, without a pull request: the next agent on the issue
-#   goes on from it (.github/scripts/agent-branch.sh), and the pull request opens once one finishes.
+#   goes on from it (.github/scripts/agent-branch.sh), and the pull request opens once one finishes. When the last
+#   agent runs out of time too, the issue gets `needs-human`, and the answer asks the owner to split it or call an
+#   agent again: the task's size, not a failure of the automation, so the run doesn't fail over it.
 # - An issue kept from the agents goes to them once nothing keeps it: when a maintainer takes its `retry next week`
 #   label off, or its last assignee (the `unassigned` event, which the app's caller must listen to) if no agent was
 #   called on it yet.
@@ -723,6 +725,7 @@ jobs:
       response: ${{ steps.claude.outputs.response }}
       error: ${{ steps.claude.outputs.error }}
       out-of-credit: ${{ steps.claude.outputs.out-of-credit }}
+      out-of-time: ${{ steps.clock.outputs.out-of-time }}
       outcome: ${{ steps.claude.outcome }}
       commits: ${{ steps.bundle.outputs.commits }}
     steps:
@@ -775,7 +778,7 @@ jobs:
           if [ "$NEW" = "true" ] && [ "$CONTINUED" != "true" ]; then
             git switch -c "$BRANCH"
           fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          { echo "sha=$(git rev-parse HEAD)"; echo "at=$(date +%s)"; } >> "$GITHUB_OUTPUT"
       # A failure is dealt with in the job below: the issue goes to Copilot, or waits for next week, and the run fails
       # only on errors other than a used-up quota. Out of time counts as a failure: stopped here, this job still ends
       # with its outputs, while its own limit would end it without a word
@@ -814,6 +817,18 @@ jobs:
               messages become the release notes and the stores' "What's new". The pull request closes the issue.
             - End with a short summary of what you changed, or of what the owner must do: the workflow posts it as
               a comment.
+      # The step's limit stops Claude without a reason, as a start that failed does: having run its whole hour tells them
+      # apart. Out of time is the task's size, which the owner hears of on the issue, not a failure of the automation
+      - name: Tell whether Claude ran out of time
+        id: clock
+        if: steps.claude.outputs.done != 'true' && steps.claude.outputs.error == ''
+        env:
+          STARTED: ${{ steps.start.outputs.at }}
+        run: |
+          if [ "$(( $(date +%s) - STARTED ))" -ge 3540 ]; then
+            echo "out-of-time=true" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Claude ran out of time::It was still working after an hour."
+          fi
       # Also when Claude stopped before it finished an issue (out of time or credit, an error): what it did goes to
       # its branch, for the next agent to go on from
       - name: Hand Claude's commits over
@@ -906,9 +921,14 @@ jobs:
           PUSHED: ${{ steps.push.outcome }}
           KEPT: ${{ steps.keep.outputs.pushed }}
           BRANCH: ${{ needs.issue-claude-start.outputs.branch }}
+          OUT_OF_TIME: ${{ needs.issue-claude.outputs.out-of-time }}
+          # The last agent on the issue: no Copilot to hand it over to
+          LAST: ${{ github.event_name == 'issues' && secrets.COPILOT_GITHUB_TOKEN == '' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ "$STOPPED" = "true" ]; then
+          if [ "$OUT_OF_TIME" = "true" ]; then
+            WHY="it ran out of time: it was still working after an hour."
+          elif [ "$STOPPED" = "true" ]; then
             WHY="it stopped before it finished, out of time (an hour) or before it could start: see the run."
           fi
           if [ "$DONE" = "true" ]; then
@@ -926,9 +946,13 @@ jobs:
           if [ "$KEPT" = "true" ]; then
             body="$(printf '%s\n\n%s' "$body" "What it did is on the branch \`$BRANCH\`: the next agent on the issue goes on from it.")"
           fi
+          if [ "$OUT_OF_TIME" = "true" ] && [ "$LAST" = "true" ]; then
+            body="$(printf '%s\n\n%s' "$body" "It needs you: no agent could finish it in its hour. Split it into smaller issues, or call an agent again (\`@claude ...\`), which goes on from what is on the branch.")"
+          fi
           gh api -X PATCH "repos/$GH_REPO/issues/comments/$COMMENT" --silent -f body="$body"
       # Claude couldn't take the issue. The copilot label, added as the bot App so that it starts the Copilot job, hands
-      # it over; without Copilot, an issue Claude had no quota left for waits for next week
+      # it over; without Copilot, an issue Claude had no quota left for waits for next week, and one it ran out of time
+      # on needs the owner (its answer says so)
       - name: Hand the issue over
         if: needs.issue-claude.outputs.done != 'true' && github.event_name == 'issues' && steps.token.outcome == 'success'
         env:
@@ -937,6 +961,7 @@ jobs:
           ISSUE: ${{ github.event.issue.number }}
           COPILOT_READY: ${{ secrets.COPILOT_GITHUB_TOKEN != '' }}
           OUT_OF_CREDIT: ${{ needs.issue-claude.outputs.out-of-credit }}
+          OUT_OF_TIME: ${{ needs.issue-claude.outputs.out-of-time }}
         run: |
           if [ "$COPILOT_READY" = "true" ]; then
             # Created when missing: on a repository the settings never reached, the handover failed here
@@ -944,12 +969,17 @@ jobs:
             gh issue edit "$ISSUE" --add-label copilot
           elif [ "$OUT_OF_CREDIT" = "true" ]; then
             .machinery/.github/scripts/take-agents-off.sh "$ISSUE" --retry-next-week
+          elif [ "$OUT_OF_TIME" = "true" ]; then
+            gh label create needs-human --color D93F0B --description "Automation could not handle this" --force
+            gh issue edit "$ISSUE" --add-label needs-human
+            echo "::notice::Claude ran out of time, and no agent is left to go on: #$ISSUE needs the owner."
           fi
-      # Waiting for the quota is handled above; any other error of Claude's is the automation's, for Automation health
+      # Waiting for the quota and running out of time are handled above; any other error of Claude's is the automation's,
+      # for Automation health
       - name: Report Claude's failure
         if: >-
           (needs.issue-claude.result != 'success' || needs.issue-claude.outputs.outcome == 'failure') &&
-          needs.issue-claude.outputs.out-of-credit != 'true'
+          needs.issue-claude.outputs.out-of-credit != 'true' && needs.issue-claude.outputs.out-of-time != 'true'
         env:
           WHY: ${{ needs.issue-claude.outputs.error }}
         run: |
@@ -1013,6 +1043,7 @@ jobs:
       response: ${{ steps.copilot.outputs.response }}
       error: ${{ steps.copilot.outputs.error }}
       out-of-credit: ${{ steps.copilot.outputs.out-of-credit }}
+      out-of-time: ${{ steps.copilot.outputs.out-of-time }}
       outcome: ${{ steps.copilot.outcome }}
       commits: ${{ steps.bundle.outputs.commits }}
     steps:
@@ -1158,6 +1189,8 @@ jobs:
           PUSHED: ${{ steps.push.outcome }}
           KEPT: ${{ steps.keep.outputs.pushed }}
           BRANCH: ${{ needs.issue-copilot-start.outputs.branch }}
+          # On an issue, Copilot is the last agent: out of time, the issue needs the owner
+          ASK_OWNER: ${{ github.event_name == 'issues' && needs.issue-copilot.outputs.out-of-time == 'true' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$DONE" = "true" ]; then
@@ -1173,10 +1206,14 @@ jobs:
             if [ "$KEPT" = "true" ]; then
               body="$(printf '%s\n\n%s' "$body" "What it did is on the branch \`$BRANCH\`: the next agent on the issue goes on from it.")"
             fi
+            if [ "$ASK_OWNER" = "true" ]; then
+              body="$(printf '%s\n\n%s' "$body" "It needs you: no agent could finish it in its hour. Split it into smaller issues, or call an agent again (\`@claude ...\`), which goes on from what is on the branch.")"
+            fi
           fi
           gh issue comment "$NUMBER" --body "$body"
       # Given an issue it couldn't finish (no token, no credit, error), the label comes off, with Copilot, so that adding
-      # it again tries again; out of credit, the issue waits for next week
+      # it again tries again; out of credit, the issue waits for next week; out of time, it needs the owner (its answer
+      # says so)
       - name: Take Copilot off
         if: >-
           !cancelled() && github.event_name == 'issues' && steps.token.outcome == 'success' &&
@@ -1186,6 +1223,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ISSUE: ${{ github.event.issue.number }}
           OUT_OF_CREDIT: ${{ needs.issue-copilot.outputs.out-of-credit }}
+          OUT_OF_TIME: ${{ needs.issue-copilot.outputs.out-of-time }}
         run: |
           if [ "$OUT_OF_CREDIT" = "true" ]; then
             .machinery/.github/scripts/take-agents-off.sh "$ISSUE" --retry-next-week
@@ -1193,11 +1231,17 @@ jobs:
           else
             .machinery/.github/scripts/take-agents-off.sh "$ISSUE"
           fi
-      # Waiting for the quota is handled above; any other error of Copilot's is the automation's, for Automation health
+          if [ "$OUT_OF_TIME" = "true" ]; then
+            gh label create needs-human --color D93F0B --description "Automation could not handle this" --force
+            gh issue edit "$ISSUE" --add-label needs-human
+            echo "::notice::Copilot ran out of time, and no agent is left to go on: #$ISSUE needs the owner."
+          fi
+      # Waiting for the quota and running out of time are handled above; any other error of Copilot's is the
+      # automation's, for Automation health
       - name: Report Copilot's failure
         if: >-
           (needs.issue-copilot.result != 'success' || needs.issue-copilot.outputs.outcome == 'failure') &&
-          needs.issue-copilot.outputs.out-of-credit != 'true'
+          needs.issue-copilot.outputs.out-of-credit != 'true' && needs.issue-copilot.outputs.out-of-time != 'true'
         env:
           WHY: ${{ needs.issue-copilot.outputs.error }}
         run: |

@@ -107,7 +107,9 @@ that file, so a failing licence check stays the owner's call.
   again, goes on from that branch (`agent-branch.sh`: the issue's newest branch, when it never had a pull request),
   and once one finishes, the pull request opens from the whole branch, titled by its first commit that isn't such a
   save (`pull-request-title.sh`). On a pull request's branch, work that isn't finished is never pushed: the pull
-  request would merge it once CI is green.
+  request would merge it once CI is green. When the last agent (Copilot after Claude, or Claude without Copilot) runs
+  out of time too, the issue gets `needs-human`, and the answer asks the owner to split it or call an agent again:
+  that is the task's size, not a failure of the automation, so it doesn't fail the run or reach Automation health.
 - **The build gets no credentials**: an agent runs `./gradlew`, which runs the code of the app and of everything it
   depends on. Claude Code's subprocess scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) keeps Claude's and the other
   credentials out of the environment of the commands Claude runs, but for the read-only GitHub token that `gh` needs.

@@ -42,6 +42,9 @@ outputs:
   out-of-credit:
     description: '"true" when Copilot failed because the plan''s AI credits ran out'
     value: ${{ steps.run.outputs.out-of-credit == 'true' }}
+  out-of-time:
+    description: '"true" when Copilot was stopped at its time limit (`timeout-minutes`) before it finished'
+    value: ${{ steps.run.outputs.out-of-time == 'true' }}
 runs:
   using: composite
   steps:
@@ -137,6 +140,11 @@ runs:
         if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
           # timeout's own exit codes: it stopped Copilot, or killed it for not stopping
           reason="Copilot ran out of time: it was still working after $MINUTES minutes."
+          # The task's size, not a failure of the automation: a warning, and the caller asks the owner
+          echo "::warning title=Copilot ran out of time::${reason//%/%25}"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "out-of-time=true" >> "$GITHUB_OUTPUT"
+          exit 1
         else
           # "|| true": under pipefail, a log without any of these words would end the step here, before its outputs
           reason="$(grep -iE 'error|fail|refus|denied|exceeded|insufficient|quota|credit|[^0-9](401|402|403|429)([^0-9]|$)' "$log" |
