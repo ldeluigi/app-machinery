@@ -20,7 +20,10 @@ kotlin {
     compilerOptions { optIn.add("kotlin.uuid.ExperimentalUuidApi") }
     android {
         namespace = "${app.codePackage}.shared"
-        compileSdk = int("android-compileSdk")
+        compileSdk {
+            val level = apiLevel("android-compileSdk")
+            version = release(level.major) { minorApiLevel = level.minor }
+        }
         minSdk = int("android-minSdk")
         // Android resources live in src/androidMain/res, and the Compose resources ride on Android assets.
         androidResources { enable = true }

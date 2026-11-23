@@ -16,6 +16,22 @@ internal fun lib(alias: String): String = MachineryCatalog.libraries.getValue(al
 /** A number from the machinery's version catalog, like an Android SDK level. */
 internal fun int(alias: String): Int = MachineryCatalog.versions.getValue(alias).toInt()
 
+/** An Android API level and its minor release: `37.2` in the catalog, or `37` for the major release alone. */
+internal data class ApiLevel(
+    val major: Int,
+    val minor: Int?,
+)
+
+/** An Android API level from the machinery's version catalog, like the compileSdk, which may be a minor release. */
+internal fun apiLevel(alias: String): ApiLevel {
+    val parts =
+        MachineryCatalog.versions
+            .getValue(alias)
+            .split('.')
+            .map(String::toInt)
+    return ApiLevel(parts[0], parts.getOrNull(1))
+}
+
 /** JDK used for toolchains, read from the repository-wide `.java-version` file (kept current by CI). */
 internal val Project.javaVersion: Int
     get() =
