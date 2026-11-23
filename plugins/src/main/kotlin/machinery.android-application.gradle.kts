@@ -13,7 +13,10 @@ gitSemVer {
 
 android {
     namespace = app.codePackage
-    compileSdk = int("android-compileSdk")
+    compileSdk {
+        val level = apiLevel("android-compileSdk")
+        version = release(level.major) { minorApiLevel = level.minor }
+    }
     defaultConfig {
         applicationId = app.id
         // The launcher's label; the screens read the same name from the generated AppInfo.

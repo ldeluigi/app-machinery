@@ -11,10 +11,14 @@ data class Bump(
     val changed: Boolean get() = from != to
 }
 
-/** The latest versions available upstream. `null` means "could not be determined": leave the current one. */
+/**
+ * The latest versions available upstream. `null` means "could not be determined": leave the current one. [androidApi]
+ * is the newest stable Android platform, a minor release included (`37.2`): the compileSdk takes it whole, the
+ * targetSdk its major level, the only kind an app can target.
+ */
 data class Latest(
     val jdkLts: Int?,
-    val androidApi: Int?,
+    val androidApi: String?,
     val copilotCli: String? = null,
     val claudeCode: String? = null,
     val actionlint: String? = null,
@@ -33,7 +37,7 @@ class Machinery(
         listOfNotNull(
             bumpFile(".java-version", "JDK LTS", latest.jdkLts?.toString()),
             bumpCatalog("android-compileSdk", "compileSdk", latest.androidApi),
-            bumpCatalog("android-targetSdk", "targetSdk", latest.androidApi),
+            bumpCatalog("android-targetSdk", "targetSdk", latest.androidApi?.substringBefore('.')),
             bumpPinned(COPILOT_ACTION, "Copilot CLI", COPILOT_PIN, latest.copilotCli),
             bumpPinned(CI_WORKFLOW, "Claude Code", CLAUDE_PIN, latest.claudeCode),
             bumpPinned(SELF_CI_WORKFLOW, "actionlint", ACTIONLINT_PIN, latest.actionlint),
@@ -54,12 +58,12 @@ class Machinery(
     private fun bumpCatalog(
         key: String,
         name: String,
-        latest: Int?,
+        latest: String?,
     ): Bump? {
         val file = File(root, CATALOG)
         val text = if (file.exists()) file.readText() else ""
         return catalogVersion(text, key)?.let { current ->
-            val next = latest?.takeIf { it > current.toInt() }?.toString() ?: current
+            val next = latest?.takeIf { isNewer(it, current) } ?: current
             if (next != current) file.writeText(setCatalogVersion(text, key, next))
             Bump(name, current, next)
         }
@@ -123,12 +127,12 @@ class Machinery(
         ): String =
             Regex("""(?m)^(${Regex.escape(key)}\s*=\s*)"[^"]+"""").replace(toml) { "${it.groupValues[1]}\"$value\"" }
 
-        /** The highest stable Android API level in Google's SDK repository index. */
-        fun latestAndroidApi(repositoryXml: String): Int? =
-            Regex("""path="platforms;android-(\d+)(?:\.\d+)?"""")
+        /** The newest stable Android platform in Google's SDK repository index, with its minor release: `37.2`. */
+        fun latestAndroidApi(repositoryXml: String): String? =
+            Regex("""path="platforms;android-(\d+(?:\.\d+)?)"""")
                 .findAll(repositoryXml)
-                .mapNotNull { it.groupValues[1].toIntOrNull() }
-                .maxOrNull()
+                .map { it.groupValues[1] }
+                .reduceOrNull { newest, platform -> if (isNewer(platform, newest)) platform else newest }
 
         /** `most_recent_lts` from the Adoptium API. */
         fun latestJdkLts(availableReleasesJson: String): Int? =

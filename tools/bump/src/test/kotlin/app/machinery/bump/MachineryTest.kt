@@ -29,17 +29,30 @@ class MachineryTest :
         test("upstream indexes are parsed") {
             val repositoryXml =
                 """<p path="platforms;android-36"/><p path="platforms;android-37.2"/>""" +
-                    """<p path="platforms;android-38-beta1"/>"""
-            Machinery.latestAndroidApi(repositoryXml) shouldBe 37
+                    """<p path="platforms;android-37.10"/><p path="platforms;android-37"/>""" +
+                    """<p path="platforms;android-38-beta1"/><p path="platforms;android-33-ext4"/>"""
+            Machinery.latestAndroidApi(repositoryXml) shouldBe "37.10"
             Machinery.latestJdkLts("""{"available_lts_releases":[17,21,25],"most_recent_lts": 25}""") shouldBe 25
         }
 
         test("version files and the catalog are bumped in place") {
             val root = repository(targetSdk = "36")
-            val bumps = Machinery(root).apply(Latest(jdkLts = 21, androidApi = 38))
+            val bumps = Machinery(root).apply(Latest(jdkLts = 21, androidApi = "38"))
             bumps.filter { it.changed }.map { it.name } shouldBe listOf("compileSdk", "targetSdk")
             File(root, "gradle/libs.versions.toml").readText() shouldBe
                 "[versions]\nandroid-compileSdk = \"38\"\nandroid-targetSdk = \"38\"\nandroid-minSdk = \"26\"\n"
+        }
+
+        test("a minor release moves the compileSdk only, and a major one moves past it") {
+            val root = repository()
+            val catalog = File(root, "gradle/libs.versions.toml")
+            Machinery(root).apply(Latest(null, androidApi = "37.2")).filter { it.changed }.map { it.name } shouldBe
+                listOf("compileSdk")
+            catalog.readText() shouldContain "android-compileSdk = \"37.2\"\nandroid-targetSdk = \"37\"\n"
+            Machinery(root).apply(Latest(null, androidApi = "37.1")).none { it.changed } shouldBe true
+            Machinery(root).apply(Latest(null, androidApi = "38")).filter { it.changed }.map { it.name } shouldBe
+                listOf("compileSdk", "targetSdk")
+            catalog.readText() shouldContain "android-compileSdk = \"38\"\nandroid-targetSdk = \"38\"\n"
         }
 
         test("unknown latest versions leave files untouched") {
@@ -68,7 +81,7 @@ class MachineryTest :
 
         test("an app without the SDK levels in its catalog only gets its JDK bumped") {
             val root = tempdir().also { File(it, ".java-version").writeText("21\n") }
-            Machinery(root).apply(Latest(jdkLts = 25, androidApi = 38)).map { it.name } shouldBe listOf("JDK LTS")
+            Machinery(root).apply(Latest(jdkLts = 25, androidApi = "38")).map { it.name } shouldBe listOf("JDK LTS")
             File(root, ".java-version").readText() shouldBe "25\n"
         }
     })
