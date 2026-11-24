@@ -13,7 +13,7 @@ For changing the machinery, or understanding why it is built this way.
                           its job to the one that pushes them)
 .github/scripts/          the scripts the workflows and you run: forbidden names, issue references, health report,
                           settings, secrets, take-agents-off, out-of-credit, check-agent-commits, wait-for-publish,
-                          and their tests (test-scripts)
+                          bot-pull-requests, and their tests (test-scripts)
 plugins/                  the Gradle convention plugins (machinery.*), published on the machinery's GitHub Pages
 tools/release             the stores' "What's new" (translated by Claude), Google Play's listing graphics and texts
                           (bin/upload-listing) and the App Store listing (bin/app-store, through App Store Connect's
@@ -92,7 +92,8 @@ that file, so a failing licence check stays the owner's call.
   repository (and its runs): it can't push, post or read an issue. A start job reads the conversation for it. A
   publish job, on a clean runner with its own checkout of the machinery, takes the agent's commits as a git bundle,
   fetches them without checking them out, works out by itself what they add to the branch, refuses those that change
-  the agents' settings, and pushes as the bot. What the agent's job says of itself (its answer, whether it finished)
+  the agents' settings (but for what a merge of the default branch brings in: the owner's own files as they are
+  there), and pushes as the bot. What the agent's job says of itself (its answer, whether it finished)
   is posted, never obeyed. This rests on GitHub giving a job's runner only the secrets that job uses; and whatever
   the runner gets, the bot's token is no longer used in a workspace an agent touched. The model's credential stays
   with the agent: it can spend the plan's quota, not touch the repository.

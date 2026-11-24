@@ -2,7 +2,8 @@
 # The scripts' own tests, which Self CI runs:
 # - out-of-credit.sh tells the agents' messages about a used-up quota (the issue waits for the reset) from every other
 #   error (a failure of the automation);
-# - check-agent-commits.sh lets through only commits that follow the branch and leave the agents' settings alone;
+# - check-agent-commits.sh lets through only commits that follow the branch and leave the agents' settings alone, but
+#   for what a merge of the default branch brings in;
 # - wait-for-publish.sh waits for another run's agent exactly while its commits are still to be published;
 # - timed-out.sh tells the jobs GitHub stopped at their time limit from the ones a newer run or a person cancelled;
 # - save-unfinished-work.sh commits what an agent that stopped left uncommitted, but what it may not change;
@@ -10,7 +11,9 @@
 # - agent-branch.sh goes on from an issue's branch left unfinished, and starts a new one otherwise;
 # - split-issue.sh opens the issues an agent split one into, as sub-issues, and starts the ones that wait for none;
 # - start-waiting-issues.sh starts the others once what they wait for is merged, and closes a split issue when done;
-# - wait-until-served.sh ends a release only once the site serves every file of its plugins.
+# - wait-until-served.sh ends a release only once the site serves every file of its plugins;
+# - bot-pull-requests.sh calls Claude to merge the default branch into the bot's pull requests in conflict, and
+#   brings one up to date that no CI ran on, or leaves it to the owner.
 # Usage: test-scripts.sh
 set -euo pipefail
 
@@ -78,7 +81,8 @@ handed_over() { # <name> <the file the agent changes> [<a file the branch gets m
 }
 expect_commits() { # <published|refused|nothing> <name> <new|existing> <tip>
   local found=refused start
-  if start="$(cd "$work/fresh-$2" && "$scripts/check-agent-commits.sh" "$4" "$3" "${protected[@]}" 2> /dev/null)"; then
+  if start="$(cd "$work/fresh-$2" &&
+    BASE_REF="${BASE_REF:-}" "$scripts/check-agent-commits.sh" "$4" "$3" "${protected[@]}" 2> /dev/null)"; then
     found=published
     [ -n "$start" ] || found=nothing
   fi
@@ -106,6 +110,28 @@ repo "$work/elsewhere" bundle create --quiet "$work/elsewhere.bundle" HEAD
 git -c core.autocrlf=false clone --quiet "$work/origin" "$work/fresh-elsewhere"
 repo "$work/fresh-elsewhere" fetch --quiet --no-tags "$work/elsewhere.bundle" HEAD
 expect_commits refused elsewhere new "$(repo "$work/fresh-elsewhere" rev-parse FETCH_HEAD)"
+
+# A merge of the default branch into a pull request's branch: what the owner changed there comes with it, files only
+# the owner changes included, and isn't the agent's; a change of the agent's own to such a file still is
+repo "$work/origin" switch --quiet -c pr
+commit "$work/origin" app.txt "the pull request's"
+repo "$work/origin" switch --quiet main
+commit "$work/origin" .claude/settings.json '{"owner": "newer"}'
+merged() { # <name> [<what the agent writes in .claude/settings.json after the merge>]
+  local agent="$work/agent-$1" fresh="$work/fresh-$1" started
+  git -c core.autocrlf=false clone --quiet --branch pr "$work/origin" "$agent"
+  started="$(repo "$agent" rev-parse HEAD)"
+  repo "$agent" merge --quiet --no-edit origin/main
+  [ -z "${2:-}" ] || commit "$agent" .claude/settings.json "$2"
+  repo "$agent" bundle create --quiet "$work/$1.bundle" "$started..HEAD"
+  git -c core.autocrlf=false clone --quiet --branch pr "$work/origin" "$fresh"
+  repo "$fresh" -c fetch.fsckObjects=true fetch --quiet --no-tags "$work/$1.bundle" HEAD
+  repo "$fresh" rev-parse FETCH_HEAD
+}
+tip="$(merged merge)"
+BASE_REF=origin/main expect_commits published merge existing "$tip"
+expect_commits refused merge existing "$tip"
+BASE_REF=origin/main expect_commits refused merge-settings existing "$(merged merge-settings '{"agent": true}')"
 
 # The wait, with a gh that answers what the script asks: the other runs' ids, then one run's jobs, tab-separated
 mkdir -p "$work/bin"
@@ -404,6 +430,82 @@ serve() { # <expected exit: 0 or 1> <version> <served files>...
 serve 0 1.2.0 app/machinery/plugins/1.2.0/plugins-1.2.0.jar app/machinery/plugins/1.2.0/plugins-1.2.0.pom
 serve 1 1.2.0 app/machinery/plugins/1.2.0/plugins-1.2.0.jar app/machinery/plugins/1.1.0/plugins-1.1.0.jar
 serve 1 1.3.0 app/machinery/plugins/1.2.0/plugins-1.2.0.jar
+
+# The bot's pull requests, with a gh that answers from the case's files and writes down what the script does
+cat > "$work/bin/gh" << 'GH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr list") cat "$CASE/prs.json" ;;
+  "pr view") echo "{\"mergeable\": \"$(cat "$CASE/mergeable")\"}" ;;
+  "label create") ;;
+  "pr edit") echo "label $3 $5" >> "$CASE/did" ;;
+  "pr comment") echo "comment $3" >> "$CASE/did" ;;
+  "pr update-branch") echo "update $3" >> "$CASE/did" ;;
+  api\ *)
+    case "$2" in
+      */compare/*) cat "$CASE/compare.json" ;;
+      */events\?*) cat "$CASE/events.json" ;;
+      */check-runs\?*) cat "$CASE/runs.json" ;;
+    esac
+    ;;
+esac
+GH
+at() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; } # <seconds since the epoch>
+# <what it does, "|"-separated, or "nothing"> <mergeable> <author> <labels> <opened, seconds ago> <runs of CI>
+# <commits behind> <files the default branch changed> <the last conflict label, seconds ago, or "">
+expect_bot() {
+  local case now=2000000000 did
+  bot_case=$((bot_case + 1))
+  case="$work/bot-$bot_case"
+  mkdir -p "$case"
+  jq -n --arg author "$3" --arg labels "$4" --arg created "$(at $((now - $5)))" '[{number: 1,
+    author: {login: $author}, headRefOid: "abc", createdAt: $created, isCrossRepository: false,
+    labels: ($labels | split(",") | map(select(. != "") | {name: .}))}]' > "$case/prs.json"
+  echo "$2" > "$case/mergeable"
+  echo "{\"total_count\": $6}" > "$case/runs.json"
+  jq -n --argjson behind "$7" --arg files "$8" \
+    '{ahead_by: $behind, files: ($files | split(",") | map(select(. != "") | {filename: .}))}' > "$case/compare.json"
+  if [ -n "$9" ]; then
+    jq -n --arg at "$(at $((now - $9)))" '[{event: "labeled", label: {name: "conflict-1"}, created_at: $at}]'
+  else
+    echo "[]"
+  fi > "$case/events.json"
+  PATH="$work/bin:$PATH" CASE="$case" GH_REPO=owner/app NOW="$now" MERGEABLE_WAIT=0 \
+    "$scripts/bot-pull-requests.sh" "app-machinery[bot]" main > /dev/null 2>&1 || true
+  did="$(paste -sd '|' "$case/did" 2> /dev/null || true)"
+  if [ "${did:-nothing}" != "$1" ]; then
+    echo "::error::bot-pull-requests.sh does \"${did:-nothing}\" for: ${*:2}. It should do \"$1\"."
+    status=1
+  fi
+}
+bot_case=0
+bot=app/app-machinery
+hour=3600
+expect_bot "comment 1|label 1 conflict-1" CONFLICTING "$bot" automerge $hour 4 3 app.kt ""
+expect_bot "comment 1|label 1 conflict-2" CONFLICTING "$bot" automerge,conflict-1 $((9 * hour)) 4 3 app.kt \
+  $((5 * hour))
+expect_bot nothing CONFLICTING "$bot" automerge,conflict-1 $((9 * hour)) 4 3 app.kt $hour
+expect_bot "label 1 needs-human|comment 1" CONFLICTING "$bot" automerge,conflict-1,conflict-2,conflict-3 \
+  $((9 * hour)) 4 3 app.kt $((5 * hour))
+expect_bot "label 1 needs-human|comment 1" CONFLICTING "$bot" automerge $hour 4 3 app.kt,.github/workflows/ci.yml ""
+expect_bot "update 1" MERGEABLE "$bot" automerge $hour 0 3 app.kt ""
+expect_bot "label 1 needs-human|comment 1" MERGEABLE "$bot" automerge $hour 0 3 .github/workflows/ci.yml ""
+expect_bot nothing MERGEABLE "$bot" automerge 600 0 3 app.kt ""
+expect_bot nothing MERGEABLE "$bot" automerge $hour 5 3 app.kt ""
+expect_bot nothing MERGEABLE "$bot" automerge $hour 0 0 "" ""
+expect_bot nothing CONFLICTING app/dependabot automerge $hour 4 3 app.kt ""
+expect_bot nothing CONFLICTING "$bot" automerge,needs-human $hour 4 3 app.kt ""
+expect_bot nothing UNKNOWN "$bot" automerge $hour 0 3 app.kt ""
+# A gh that can't tell how the pull request compares: nothing is done, and the run fails
+mkdir -p "$work/bot-broken"
+jq -n '[{number: 1, author: {login: "app/app-machinery"}, headRefOid: "abc", createdAt: "2026-01-01T00:00:00Z",
+  isCrossRepository: false, labels: []}]' > "$work/bot-broken/prs.json"
+echo CONFLICTING > "$work/bot-broken/mergeable"
+if PATH="$work/bin:$PATH" CASE="$work/bot-broken" GH_REPO=owner/app MERGEABLE_WAIT=0 \
+  "$scripts/bot-pull-requests.sh" "app-machinery[bot]" main > /dev/null 2>&1 || [ -e "$work/bot-broken/did" ]; then
+  echo "::error::bot-pull-requests.sh acted, or succeeded, though gh couldn't tell how the pull request compares."
+  status=1
+fi
 
 [ "$status" -ne 0 ] || echo "The scripts pass their tests."
 exit $status

@@ -6,6 +6,9 @@ name: Automation
 #   `major-update`, build-only ones squashed as `build(deps)`, which releases nothing) and the bot's, labelled
 #   `automerge`, merge by themselves once CI is green; the `ios` label starts the CI with its iOS build on the pull
 #   request's branch.
+# - The default branch moved, and each Monday: one of the bot's pull requests in conflict with it gets Claude to merge
+#   it in (a `conflict-N` label, three times at most), or `needs-human` when the default branch changed a workflow
+#   since, which GitHub refuses from the bot; one that no CI ran on (GitHub lost the events) is brought up to date.
 # - A failed run of CI or of the app's own jobs, or one GitHub cancelled at a job's time limit (a hang, a runner that
 #   stopped answering), but not one a newer run or a person cancelled: re-run once (network hiccups, lost runners);
 #   failed again, the CI-fix agent takes it. The triage job keeps count: each attempt on a pull request adds a label,
@@ -296,6 +299,47 @@ jobs:
             echo "Retrying #$issue"
           done
 
+  # The default branch moved (a run of CI on it ended), and each Monday: the bot's pull requests it left behind. One in
+  # conflict gets Claude to merge the default branch into it, through a conflict-N label (the start job below), or
+  # the owner; one that no CI ran on gets brought up to date, which starts CI (bot-pull-requests.sh). Nothing of the
+  # app's code is checked out or run here, where the bot's key is
+  behind-bot:
+    name: Bot pull requests behind
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
+      github.event.schedule == inputs.weekly-schedule
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The workflow token reads, check runs included, which the bot App may not
+    permissions:
+      contents: read
+      checks: read
+      issues: read
+      pull-requests: read
+    concurrency:
+      group: behind-bot
+    steps:
+      - *find-machinery
+      - *checkout-machinery
+      - id: token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+      - name: Look after the bot's pull requests
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          READ_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BOT: ${{ vars.GH_APP_LOGIN }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: .machinery/.github/scripts/bot-pull-requests.sh "$BOT" "$BASE"
+
   fix-triage:
     name: Triage
     # As the re-run: a run cancelled counts when one of its jobs ran out of time
@@ -580,8 +624,11 @@ jobs:
     # is on it (the retry job below takes it once the label or the assignee goes). The association also counts
     # read-only collaborators and organization members: the thread step checks the caller's access. A comment calls
     # Claude by naming it, when posted or once an edit adds the name: other edits of a comment that named it don't call
-    # it again.
+    # it again. The bot App's conflict-N label on one of its pull requests asks Claude to merge the default branch into
+    # it (the behind-bot job above).
     if: >-
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+       startsWith(github.event.label.name, 'conflict-') && github.event.sender.login == vars.GH_APP_LOGIN) ||
       (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review') &&
       ((github.event.action == 'labeled' && github.event.label.name == 'claude' &&
         (github.event.sender.type == 'User' || github.event.sender.login == vars.GH_APP_LOGIN)) ||
@@ -682,8 +729,11 @@ jobs:
           CONTINUED: ${{ steps.branch.outputs.continued }}
           BRANCH: ${{ steps.branch.outputs.name }}
           BASE: ${{ steps.branch.outputs.base }}
+          CONFLICT: ${{ github.event_name == 'pull_request' && startsWith(github.event.label.name, 'conflict-') }}
         run: |
-          if [ "$CONTINUED" = "true" ]; then
+          if [ "$CONFLICT" = "true" ]; then
+            task="You are on the branch of pull request #$NUMBER, which conflicts with \`$BASE\` since \`$BASE\` moved on: \`git diff origin/$BASE...HEAD\` shows its changes. Your task is to merge \`origin/$BASE\` into this branch and resolve every conflict so that both sides' changes are kept: what \`$BASE\` changed stays, and the pull request still does all it did. Then make \`./gradlew check\` pass, fixing what \`$BASE\`'s changes broke in the pull request's code, and nothing else. Commit the merge with git's own message (\`git commit --no-edit\`): the commit check skips merge commits. Any further fix is a Conventional Commit of its own."
+          elif [ "$CONTINUED" = "true" ]; then
             task="Your task is issue #$NUMBER. An agent before you stopped before it finished, out of time or on an error, and what it did is on this branch, \`$BRANCH\`: \`git log origin/$BASE..HEAD\` and \`git diff origin/$BASE...HEAD\` show it, and some of it may not build yet. Go on from there: keep what is right, fix or redo the rest, and finish the issue. The pull request's title will be the subject of the branch's first commit, leaving out the commits that only saved unfinished work: when there are only those, make your first commit's subject name the whole change."
           elif [ "$NEW" = "true" ]; then
             task="Your task is issue #$NUMBER."
@@ -799,6 +849,10 @@ jobs:
         with:
           # The bot App's "claude" label retries an issue
           allowed-bots: ${{ vars.GH_APP_LOGIN }}
+          # Asked to merge the default branch into a pull request in conflict (the behind-bot job): a local merge
+          allowed-tools: >-
+            ${{ github.event_name == 'pull_request' && startsWith(github.event.label.name, 'conflict-') &&
+            'Bash(git merge:*)' || '' }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: &issue-prompt |
