@@ -77,7 +77,8 @@ runs:
           kind=new
         fi
         read -ra protected <<< "$PROTECTED"
-        start="$("$SCRIPTS/check-agent-commits.sh" "$tip" "$kind" "${protected[@]}")"
+        # What the default branch has, a merge of it brings in: the owner's files as they are there aren't the agent's
+        start="$(BASE_REF="origin/$BASE" "$SCRIPTS/check-agent-commits.sh" "$tip" "$kind" "${protected[@]}")"
         if [ -z "$start" ]; then
           echo "There are no commits to push."
           exit 0

@@ -16,6 +16,7 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 | Pushes to `main`, when the app names its privacy policy (`privacy-page`) | CI → Privacy policy page | The policy becomes `index.md` on the `gh-pages` branch, which GitHub Pages serves as the stores' privacy page (docs/02-new-app.md, step 5b); a commit only when its text changed, on top of what the branch holds |
 | Every pull request, and its renames | Automation → Pull request title | The title is a Conventional Commit of 100 characters at most, counting the " (#123)" that squash-merging adds (it becomes the commit on `main`) |
 | Dependabot's and the bot's pull requests | Automation → automerge | GitHub merges them once CI is green; build-only updates merge as `build(deps)`, which releases nothing |
+| A run of CI on `main` ended (it moved), and Monday 08:30 UTC | Automation → Bot pull requests behind | The bot's pull requests that no longer merge by themselves: one in conflict with `main` gets Claude to merge `main` into it (`conflict-1` … `conflict-3`, then `needs-human`), or `needs-human` at once when `main` changed a workflow since it began, which GitHub refuses from the bot; one that no CI ran on, half an hour after it opened, is brought up to date with `main`, which starts CI |
 | The `ios` label on a pull request | Automation → Build for iOS too | Starts CI on the pull request's branch, with its iOS build |
 | A failed CI run, or one GitHub stopped at a job's time limit | Automation → Re-run failed jobs once | Network hiccups, lost runners and runners that stopped answering fix themselves. A run cancelled by a newer push or by hand is left as it is |
 | A run that failed, or ran out of time, twice | Automation → Triage, Fix, Fix: publish | An agent fixes it, on the pull request's branch or in a new pull request; after three attempts, `needs-human` and an issue, or, when the same jobs failed and their issue is still open, a comment on it |
@@ -45,6 +46,7 @@ Automation it starts the refresh, or the retry of the issues, at once.
 | `ios` | Builds and tests the pull request for iOS too (macOS minutes cost ten times Linux ones on a private repository). |
 | `major-update` | A major dependency update: the upgrade agent follows up after it merges. |
 | `autofix-1` … `autofix-3` | The CI-fix agent's attempts on a pull request. |
+| `conflict-1` … `conflict-3` | Claude's attempts at merging `main` into one of the bot's pull requests in conflict with it. |
 | `retry next week` | The agents ran out of credit for this issue; they try again on Monday, or as soon as you take the label off. Open an issue with it, or assigned to someone, to keep the agents off it until the label or the assignee goes. |
 | `machinery-review` | The monthly refresh, which the agent reviews. |
 
