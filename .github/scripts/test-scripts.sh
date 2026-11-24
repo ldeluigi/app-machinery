@@ -5,7 +5,8 @@
 # - check-agent-commits.sh lets through only commits that follow the branch and leave the agents' settings alone, but
 #   for what a merge of the default branch brings in;
 # - wait-for-publish.sh waits for another run's agent exactly while its commits are still to be published;
-# - timed-out.sh tells the jobs GitHub stopped at their time limit from the ones a newer run or a person cancelled;
+# - timed-out.sh tells the jobs that stopped on their own (their time limit, a runner that went) from the ones a newer
+#   run or a person cancelled;
 # - save-unfinished-work.sh commits what an agent that stopped left uncommitted, but what it may not change;
 # - pull-request-title.sh names a pull request by its branch's first commit that isn't such a save;
 # - agent-branch.sh goes on from an issue's branch left unfinished, and starts a new one otherwise;
@@ -164,34 +165,56 @@ expect_wait starts "automation / Claude|in_progress|"
 expect_wait starts "automation / Claude|completed|skipped"
 expect_wait starts "automation / Copilot|completed|success" "automation / Claude: start|completed|success"
 
-# The time limits, with a gh that answers what the script asks: the run's cancelled jobs, then each one's failure
-# annotations
+# The jobs that stopped on their own, with a gh that answers what the script asks: the run's jobs, as the script's jq
+# makes them, then each cancelled one's failure annotations
 cat > "$work/bin/gh" << 'GH'
 #!/usr/bin/env bash
 case "$2" in
-  */runs/*/jobs\?*) ls "$ANNOTATIONS" ;;
-  */check-runs/*/annotations\?*) job="${2#*/check-runs/}" && cat "$ANNOTATIONS/${job%%/*}" ;;
+  */runs/*/jobs\?*) cat "$JOBS/all" ;;
+  */check-runs/*/annotations\?*) job="${2#*/check-runs/}" && cat "$JOBS/${job%%/*}" ;;
 esac
 GH
-expect_timed_out() { # <the jobs it prints, space-separated> <each cancelled job's annotation, "id|message">...
-  local found entry
-  rm -rf "$work/annotations" && mkdir "$work/annotations"
-  for entry in "${@:2}"; do echo "${entry#*|}" >> "$work/annotations/${entry%%|*}"; done
-  found="$(PATH="$work/bin:$PATH" ANNOTATIONS="$work/annotations" GH_REPO=owner/app \
-    "$scripts/timed-out.sh" 7 | paste -sd ' ' -)"
+# <the jobs it prints, space-separated> <each job of the run, "id|conclusion|start|end|annotation", the times as hh:mm
+# of one day, or empty>...
+expect_timed_out() {
+  local found entry id conclusion started ended message
+  rm -rf "$work/jobs" && mkdir "$work/jobs" && : > "$work/jobs/all"
+  for entry in "${@:2}"; do
+    IFS='|' read -r id conclusion started ended message <<< "$entry"
+    printf '%s|%s|%s|%s\n' "$id" "$conclusion" "${started:+2026-01-01T$started:00Z}" \
+      "${ended:+2026-01-01T$ended:00Z}" >> "$work/jobs/all"
+    echo "$message" > "$work/jobs/$id"
+  done
+  found="$(PATH="$work/bin:$PATH" JOBS="$work/jobs" GH_REPO=owner/app "$scripts/timed-out.sh" 7 | paste -sd ' ' -)"
   if [ "$found" != "$1" ]; then
-    echo "::error::timed-out.sh prints \"$found\" for the cancelled jobs: ${*:2}. It should print \"$1\"."
+    echo "::error::timed-out.sh prints \"$found\" for the jobs: ${*:2}. It should print \"$1\"."
     status=1
   fi
 }
 
-expect_timed_out "11" "11|The job has exceeded the maximum execution time of 45m0s"
-expect_timed_out "11" "11|The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 45 minutes."
-expect_timed_out "" "11|Canceling since a higher priority waiting request for ci-refs/pull/9/merge-pull_request exists"
-expect_timed_out "" "11|The operation was canceled."
-expect_timed_out "12" "11|The operation was canceled." "12|The job has exceeded the maximum execution time of 60m0s"
-expect_timed_out "11 12" "11|The job has exceeded the maximum execution time of 45m0s" \
-  "12|The job has exceeded the maximum execution time of 60m0s"
+# At the time limit
+expect_timed_out "11" "11|cancelled|10:00|10:45|The job has exceeded the maximum execution time of 45m0s"
+runner_timed_out="The job running on runner GitHub Actions 3 has exceeded the maximum execution time of 45 minutes."
+expect_timed_out "11" "11|cancelled|10:00|10:45|$runner_timed_out"
+expect_timed_out "12" "11|cancelled|10:00|10:20|The operation was canceled." \
+  "12|cancelled|10:00|11:00|The job has exceeded the maximum execution time of 60m0s"
+expect_timed_out "11 12" "11|cancelled|10:00|10:45|The job has exceeded the maximum execution time of 45m0s" \
+  "12|cancelled|10:00|11:00|The job has exceeded the maximum execution time of 60m0s"
+# A newer run or a person cancelled the run: every job running then stopped
+newer="Canceling since a higher priority waiting request for ci-refs/pull/9/merge-pull_request exists"
+expect_timed_out "" "11|cancelled|10:00|10:20|$newer"
+expect_timed_out "" "11|cancelled|10:00|10:20|The operation was canceled."
+expect_timed_out "" "11|cancelled|10:00|10:20|The operation was canceled." \
+  "12|cancelled|10:05|10:20|The operation was canceled." "13|skipped|||"
+# ...but for the jobs that had finished before, or started after (one that runs whatever happened)
+expect_timed_out "" "11|cancelled|10:00|10:20|The operation was canceled." "12|success|10:00|10:15|" \
+  "13|success|10:21|10:22|"
+# Its runner went: another job, running then, went on to finish
+expect_timed_out "11" "11|cancelled|10:00|10:25|The operation was canceled." "12|success|10:18|10:28|" "13|skipped|||"
+expect_timed_out "11" "11|cancelled|10:00|10:25|The operation was canceled." "12|failure|10:18|10:28|"
+expect_timed_out "11" "11|cancelled||10:25|The operation was canceled." "12|success|10:18|10:28|"
+expect_timed_out "" "11|cancelled|10:00||The operation was canceled." "12|success|10:18|10:28|"
+expect_timed_out "" "11|success|10:00|10:10|" "12|failure|10:00|10:12|"
 expect_timed_out ""
 
 # An agent that stopped before it finished: what it left uncommitted is saved, but for what it may not change
