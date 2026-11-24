@@ -155,6 +155,12 @@ jobs:
             done
             if [ "$build_only" = true ]; then subject="build(deps):${TITLE#*:}"; fi
           fi
+          # A group across directories gives Dependabot a title over commitlint's 100 characters, which would break the
+          # commit check on the default branch: it is shortened as Dependabot shortens its own commit subjects, without
+          # "from X to Y", then without "in …", and as a last resort cut at 100 characters
+          if [ "${#subject}" -gt 100 ]; then subject="$(sed -E 's/ from [^ ]+ to [^ ]+//' <<< "$subject")"; fi
+          if [ "${#subject}" -gt 100 ]; then subject="${subject%% in *}"; fi
+          if [ "${#subject}" -gt 100 ]; then subject="${subject:0:100}"; fi
           echo "subject=$subject" >> "$GITHUB_OUTPUT"
       # Two runs for one pull request (opened and labeled together) ask at once, and GitHub refuses the second one with
       # "Merge already in progress": that is a success once the first one's request went through
