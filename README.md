@@ -7,7 +7,8 @@ app so that each one keeps almost nothing of its own:
   TestFlight, the store listings (Google Play's graphics, the App Store's whole listing), auto-merge, and AI agents (Claude Code, with the Copilot CLI as a fallback)
   that take issues, fix failing builds, adopt major updates and review a monthly refresh.
 - **Gradle plugins** that the apps build with: Kotlin Multiplatform, Compose Multiplatform, the Android app, static
-  analysis (detekt, ktlint, copy-paste check), licence checks, translation checks, and the iOS project's settings.
+  analysis (detekt, ktlint, copy-paste check), licence checks, translation checks, store texts within the stores'
+  limits, and the iOS project's settings.
 - **Repository settings as code**: merge options, labels, the `release` environment and the default branch's rules,
   applied to every app.
 - **Docs that say every click** of what can't be automated.

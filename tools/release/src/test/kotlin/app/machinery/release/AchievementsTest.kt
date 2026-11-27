@@ -118,6 +118,32 @@ class AchievementsTest :
             error.message shouldContain "Ids listed twice: first"
         }
 
+        test("a text too long for a service, in any language, fails before anything goes up") {
+            val dir = root.resolve("long")
+            gameIn(dir)
+            dir.write(
+                "composeApp/src/commonMain/composeResources/values-it/strings.xml",
+                """<resources><string name="ach_first">${"N".repeat(101)}</string>""" +
+                    """<string name="ach_first_note">${"è".repeat(121)}</string></resources>""",
+            )
+            val error =
+                shouldThrow<IllegalStateException> { Achievements.read(dir.resolve(Achievements.FILE), "en-US", dir) }
+            error.message shouldContain "first in it: the name has 101 characters, Google Play Games takes 100"
+            error.message shouldContain "first in it: the description has 121 characters, Game Center takes 120"
+            dir.write(
+                "composeApp/src/commonMain/composeResources/values-it/strings.xml",
+                """<resources><string name="ach_first">${"N".repeat(100)}</string>""" +
+                    """<string name="ach_first_note">${"è".repeat(120)}</string></resources>""",
+            )
+            Achievements
+                .read(dir.resolve(Achievements.FILE), "en-US", dir)
+                .list
+                .first()
+                .texts
+                .getValue("it")
+                .description shouldBe "è".repeat(120)
+        }
+
         test("Android's escapes and quotes come off a resource string") {
             StringResources.unescape("Don\\'t \\\"stop\\\"\\nnow") shouldBe "Don't \"stop\"\nnow"
             StringResources.unescape("\"  spaced  \"") shouldBe "  spaced  "

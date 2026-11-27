@@ -122,6 +122,18 @@ val checkTranslations =
     }
 tasks.named("check") { dependsOn(checkTranslations) }
 
+// The texts a release sends to the stores, against what they take: a refused one fails here, not after the release.
+val storeFolder = rootProject.layout.projectDirectory.dir("store")
+val checkStoreTexts =
+    tasks.register<CheckStoreTexts>("checkStoreTexts") {
+        store = storeFolder
+        storeFiles.from(storeFolder)
+        resources = handWrittenResources
+        appName = app.name
+        report = layout.buildDirectory.file("reports/store-texts.txt")
+    }
+tasks.named("check") { dependsOn(checkStoreTexts) }
+
 allowLicences()
 
 checkHandWrittenSourcesOnly()
