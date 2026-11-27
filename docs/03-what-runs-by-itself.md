@@ -8,7 +8,7 @@ and ships the app, **Automation** (`automation.yml`) for everything that looks a
 
 | When | Workflow → job | What happens |
 |---|---|---|
-| Every pull request and push | CI → Conventional commits, Repository rules, Build and check | Commit messages are Conventional Commits; no forbidden name; no issue number in a commit; actions pinned to commits; `./gradlew check` (tests, detekt, ktlint, copy-paste check, Android Lint, licences, translations) and a debug build |
+| Every pull request and push | CI → Conventional commits, Repository rules, Build and check | Commit messages are Conventional Commits; no forbidden name; no issue number in a commit; actions pinned to commits; `./gradlew check` (tests, detekt, ktlint, copy-paste check, Android Lint, licences, translations, store texts within the stores' limits) and a debug build |
 | Pushes to `main`, Dependabot's Gradle updates, refreshes | CI → Emulator smoke test | The instrumented tests on an Android emulator |
 | Pushes to `main` touching code, pull requests labelled `ios`, runs by hand | CI → Build and test for iOS | The Kotlin tests on an iOS simulator, the Xcode build, the UI tests, screenshots |
 | Pushes to `main`, once all of the above passed | CI → Version, build and GitHub Release | semantic-release decides the version from the commits; signed bundle; GitHub Release with the changelog; "What's new" from the last releases, translated by Claude into the app's languages |

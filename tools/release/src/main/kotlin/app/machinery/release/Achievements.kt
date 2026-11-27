@@ -84,6 +84,15 @@ data class Achievements(
         /** Google Play Games takes points in steps of this. */
         const val POINT_STEP = 5
 
+        /** Google Play Games takes names of at most this many characters, in every language. */
+        const val NAME_LIMIT = 100
+
+        /**
+         * Game Center takes descriptions of at most this many characters, in every language (App Store Connect's
+         * answer to a longer one); Google Play Games takes 500.
+         */
+        const val DESCRIPTION_LIMIT = 120
+
         private const val SECRET = "secret"
         private val ID = Regex("""[a-z][a-z0-9_]{0,99}""")
         private val DEFAULTS =
@@ -168,7 +177,7 @@ data class Achievements(
                             text.name.isNotBlank() && text.description.isNotBlank()
                         } ?: false
                     },
-                )
+                ) + tooLong(achievement)
             } +
                 listOfNotNull(
                     "The achievements have $total points: the services take $MAX_TOTAL at most"
@@ -176,6 +185,28 @@ data class Achievements(
                     "Ids listed twice: ${twice.joinToString()}".takeIf { twice.isNotEmpty() },
                     "No achievements listed".takeIf { list.isEmpty() },
                 )
+        }
+
+        /** The texts of [achievement], in any language, that a service would refuse as too long. */
+        private fun tooLong(achievement: Achievement): List<String> =
+            achievement.texts.toSortedMap().flatMap { (language, text) ->
+                val id = achievement.id
+                listOfNotNull(
+                    tooLong(id, language, "name", text.name, NAME_LIMIT, "Google Play Games"),
+                    tooLong(id, language, "description", text.description, DESCRIPTION_LIMIT, "Game Center"),
+                )
+            }
+
+        private fun tooLong(
+            id: String,
+            language: String,
+            what: String,
+            text: String,
+            limit: Int,
+            service: String,
+        ): String? {
+            val length = text.codePointCount(0, text.length)
+            return "$id in $language: the $what has $length characters, $service takes $limit".takeIf { length > limit }
         }
     }
 }
