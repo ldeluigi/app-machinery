@@ -25,8 +25,10 @@ tools/thread              the only GitHub text the agents read: an issue's or pu
 gradle/libs.versions.toml every version the plugins give the apps
 settings/                 repository settings, labels and rulesets as code
 release/releaserc.yml     semantic-release, as the apps' releases run it
-.claude/skills/           the agents' skills; commit-messages (how to write commits and pull request titles that
-                          pass CI) is shared: the monthly refresh copies it into every app
+.claude/skills/           the agents' skills, which the monthly refresh copies into every app: commit-messages
+                          (commits and pull request titles that pass CI), smooth-ui (screens that never jump nor
+                          drop a frame) and native-texts (texts that sound native in every language and fit the
+                          stores); the agents' prompts tell them to read and check against them
 ```
 
 ## How an app calls a workflow
