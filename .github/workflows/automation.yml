@@ -547,7 +547,9 @@ jobs:
                - Not fixable by code (expired or missing credentials, a store's API errors, an outage, a quota): change
                  nothing.
             3. Make the smallest change that fixes the root cause, and run the app's checks (`./gradlew check`) until
-               they pass. Wait for every command to finish: whatever isn't committed when you stop is lost.
+               they pass. A fix in a screen keeps to `.claude/skills/smooth-ui/SKILL.md`, one in a text to
+               `.claude/skills/native-texts/SKILL.md`. Wait for every command to finish: whatever isn't committed
+               when you stop is lost.
             4. Commit with a Conventional Commit message, e.g. `fix(deps): migrate to the new Room API`, never with an
                issue number in it. Push nothing: the workflow publishes your commits.
             5. End with a short answer: what you changed, or what happened and what the owner must do.
@@ -876,6 +878,11 @@ jobs:
               a choice only the owner can make), change nothing: say what the owner must do, and stop. On an issue,
               the workflow then labels it `needs-human`.
             - Keep the change to what was asked.
+            - Before you change a screen, an animation, a gesture or what a screen loads, read
+              `.claude/skills/smooth-ui/SKILL.md`; before you add or change a text in any language, an achievement,
+              a store listing or a release note, read `.claude/skills/native-texts/SKILL.md`. Check your change
+              against their lists before you finish: the owner rejects a screen that jumps or stutters, and a text
+              that reads like a translation.
             - Run `./gradlew check` and make it pass before you finish. Wait for every command to finish: whatever
               isn't committed when you stop is lost.
             - Commit every change yourself, as Conventional Commits, and push nothing: the workflow pushes your
@@ -1565,7 +1572,8 @@ jobs:
             1. From that commit's changes, find each updated dependency with its old and new version.
             2. Read the release notes, changelog or migration guide between those versions.
             3. Replace the APIs the new version deprecates, and take up recommended new APIs or configuration where
-               they fit naturally. Don't change what the app does, and don't refactor unrelated code.
+               they fit naturally. Don't change what the app does, and don't refactor unrelated code. What you change
+               in a screen keeps to `.claude/skills/smooth-ui/SKILL.md`: nothing jumps, every frame on time.
             4. Run the app's checks (`./gradlew check`) until they pass. Wait for every command to finish: whatever
                isn't committed when you stop is lost.
             5. Commit your changes; the first commit's subject becomes the pull request's title, e.g.
@@ -1647,10 +1655,11 @@ jobs:
           echo ".machinery/" >> .git/info/exclude
           ./.machinery/gradlew -p .machinery :tools:bump:installDist --quiet
           .machinery/tools/bump/build/install/bump/bin/bump
-      # The agents' shared skills, like how to write commit messages, come from the machinery as its versions do
+      # The agents' shared skills (how to write commit messages, smooth screens and native texts) come from the
+      # machinery as its versions do
       - name: Bring the shared skills up to date
         run: |
-          shared=(commit-messages)
+          shared=(commit-messages smooth-ui native-texts)
           for skill in "${shared[@]}"; do
             rm -rf ".claude/skills/$skill"
             mkdir -p .claude/skills
@@ -1718,9 +1727,11 @@ jobs:
       error: ${{ steps.agent.outputs.error }}
       commits: ${{ steps.agent.outputs.commits }}
     steps:
+      # With its history: the agent checks the last month's changes against the shared skills
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.refresh.outputs.branch }}
+          fetch-depth: 0
           persist-credentials: false
       - *find-machinery
       - *checkout-machinery
@@ -1753,11 +1764,17 @@ jobs:
                For each, decide whether it applies to the app, from its permissions and features (its manifests and
                Info.plist), its target SDK and what it does with data (its privacy policy), and fix on this branch what
                code can fix.
-            3. Run the app's checks (`./gradlew check`) until they pass, and commit with Conventional Commit messages,
+            3. Check what the last month brought against the skills the refresh shares
+               (`git log --since="5 weeks ago" -p -- composeApp/src store` shows it): screens against the list at the
+               end of `.claude/skills/smooth-ui/SKILL.md`, texts in every language, achievements and store listings
+               against the list at the end of `.claude/skills/native-texts/SKILL.md`. Fix on this branch what breaks
+               them, in its own commits.
+            4. Run the app's checks (`./gradlew check`) until they pass, and commit with Conventional Commit messages,
                never with an issue number in them. Push nothing: the workflow publishes your commits.
-            4. End with a short answer, in Markdown: what you fixed; each policy announcement and deadline you checked
-               and what you did about it; and, as a list headed `Owner:`, each thing only the owner can do (a store
-               console declaration, the Data safety form, a store listing, a credential), with its deadline and steps.
+            5. End with a short answer, in Markdown: what you fixed; what the check of the last month against the
+               skills found; each policy announcement and deadline you checked and what you did about it; and, as a
+               list headed `Owner:`, each thing only the owner can do (a store console declaration, the Data safety
+               form, a store listing, a credential), with its deadline and steps.
 
   refresh-review-publish:
     name: "Review: publish"

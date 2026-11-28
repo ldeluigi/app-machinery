@@ -36,6 +36,14 @@ before changing anything.
     job reads the conversation for it (rule 9); a publish job, which runs nothing of the agent's, publishes its commits
     (`.github/actions/bundle-commits`, then `publish-commits`).
 
+## What the owner expects of every app
+
+The shared skills `smooth-ui` (screens that never jump nor drop a frame) and `native-texts` (texts that sound native
+in every language and fit the stores), in `.claude/skills/`, hold what reviews of the apps found. The monthly refresh
+copies them into every app, and the agents' prompts tell the agents to check their changes against them. When an app
+teaches something new about either (a screen that jumps or stutters, a text that reads like a translation, a text a
+store refuses), add it to the skill here, without naming the app (rule 1), so that no app repeats it.
+
 ## Before pushing
 
 Run `./gradlew build` (the tools, with their tests and gradle-kotlin-qa's checks: detekt, ktlint, copy-paste) and
