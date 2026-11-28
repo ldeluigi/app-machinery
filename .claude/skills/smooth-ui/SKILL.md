@@ -43,7 +43,9 @@ or opens and gives back its room with an animation, so everything around it glid
   composition or earlier), never on resume after it: a page that showed "Loading…" for its whole flight, then swapped
   its content in, looked broken.
 - **Values that are known early are set early**: a list of locked options shown complete and then trimmed after a
-  background count looked like a glitch.
+  background count looked like a glitch. What is read in the background at start-up (a saved game, settings) and is
+  there already when a screen starts is its initial state, not `false` then `true` a moment later: a Resume button that
+  slid in after the home screen appeared looked broken.
 
 ## Every frame on time
 
@@ -71,7 +73,11 @@ or opens and gives back its room with an animation, so everything around it glid
 - **Keep animations continuous when their speed changes**: accumulate a phase (`phase += dt * speed`) instead of
   `sin(time * speed)`, or every star jumps when the speed changes.
 - **Colours change with the motion they belong to**: `animateColorAsState`, or a pressed key that springs while its
-  colour snaps looks cheap. A pulse ends by fading out, not vanishing.
+  colour snaps looks cheap. Give colours the motion's stiffness without its bounce: a colour that overshoots flashes.
+  A pulse ends by fading out, not vanishing.
+- **Text drawn with a moving brush** (a foil, a shine): draw the laid-out text with a cached brush that you translate,
+  not in an offscreen layer with `BlendMode.SrcAtop`: the layer clips the marks that reach past the text's box (Thai,
+  Vietnamese, Hindi) and costs a pass.
 - **Screen and phase transitions**: fade the old screen out quickly, then the new one in (`fadeOut(tween(90))`, then
   `fadeIn(tween(220, 90))`): two full screens at half opacity for a long spring cost and look muddy. Never swap a
   screen's content in the middle of a navigation transition with an early return; crossfade it, and let heavy first
@@ -86,7 +92,11 @@ or opens and gives back its room with an animation, so everything around it glid
   with the release velocity. A dragged card on a spring trailed the finger by 50 ms.
 - Hit-testing and hover use one coordinate space: under a scaled parent (a screen shrunk to fit), convert with
   `localToRoot`, or the highlighted target runs ahead of the finger.
-- Items swapped during a drag (reordering) glide to their new place; the displaced neighbour must not jump a row.
+- Items swapped during a drag (reordering) glide to their new place; the displaced neighbour must not jump a row. A
+  released item glides the rest of the way and stays on top until it lands; one grabbed while it glides is taken from
+  where it is drawn.
+- A tap that starts work ignores a second tap while the work runs, and drops the work's result if what it was for has
+  changed meanwhile (the player left, the answer changed).
 
 ## The main thread only draws
 
@@ -108,7 +118,17 @@ the app's background dispatcher), and its result comes back as state:
 - **Formatters**: number and date formatters cached per locale and style, never built per call in composition.
 - **Composition stays cheap**: pass each section only the fields it reads, so a keystroke doesn't recompose a whole
   form; `remember` objects of lambdas (action holders) instead of rebuilding them on every recomposition; give list
-  items only stable or remembered arguments; don't compose hundreds of rows at once (make them lazy items).
+  items only stable or remembered arguments (data classes, `@Immutable` holders); don't compose hundreds of rows at
+  once (make them lazy items). Collect flows with `collectAsStateWithLifecycle()`, never `.value` in composition.
+- **One look at the system, shared**: what the phone has (installed apps, permissions) lives in one app-wide
+  `StateFlow`, looked at again once when the app comes back in front (off the main thread where the platform allows
+  it); screens and view models read it and never ask the system themselves. Two screens that each asked on resume did
+  the same calls twice, on the main thread.
+- **Start-up**: hold the heavy loads (catalogues, indexes) until the first screen has drawn its first frames, then run
+  them at a low priority (on Android just above background priority, which itself can confine a thread to the slow
+  cores; on iOS the utility queue), and decode each file once even when two screens ask for it at the same time.
+- **Faster code gives the same results**: before speeding up an algorithm whose output users see (a shuffle, a
+  ranking), record what it produces for a set of inputs in a test, and keep that test passing.
 
 ## Before you open the pull request
 
